@@ -61,6 +61,11 @@ install(TARGETS sycl_ckks_accelerator
 )
 
 install(DIRECTORY include/ DESTINATION include)
+install(FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a
+    ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lanes_double_253.a
+    DESTINATION lib
+)
 install(EXPORT sycl_ckks_acceleratorTargets
     NAMESPACE sycl_ckks_accelerator::
     DESTINATION lib/cmake/sycl_ckks_accelerator
