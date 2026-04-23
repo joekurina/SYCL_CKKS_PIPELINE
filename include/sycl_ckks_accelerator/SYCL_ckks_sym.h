@@ -6,6 +6,9 @@
 #ifdef __cplusplus
 #include <complex>
 typedef std::complex<double> complex_double;
+#else
+#include <complex.h>
+typedef double complex complex_double;
 #endif
 
 #ifndef M_PI
