@@ -38,35 +38,51 @@ else()
     target_compile_definitions(sycl_ckks_accelerator PRIVATE FPGA_EMULATOR=1)
 endif()
 
-# The RTL archives are consumed by downstream executables that link this static
-# library. They intentionally remain separate link inputs rather than being
-# repacked into libsycl_ckks_accelerator.a.
-target_link_libraries(sycl_ckks_accelerator
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a
-        ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lanes_double_253.a
+set(SYCL_CKKS_NTT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a)
+set(SYCL_CKKS_IFFT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lanes_double_253.a)
+set(SYCL_CKKS_MERGED_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator_merged.a)
+set(SYCL_CKKS_MRI_SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/merge_sycl_ckks_accelerator.mri)
+
+file(WRITE ${SYCL_CKKS_MRI_SCRIPT}
+    "CREATE ${SYCL_CKKS_MERGED_ARCHIVE}\n"
+    "ADDLIB ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator.a\n"
+    "ADDLIB ${SYCL_CKKS_NTT_RTL_ARCHIVE}\n"
+    "ADDLIB ${SYCL_CKKS_IFFT_RTL_ARCHIVE}\n"
+    "SAVE\n"
+    "END\n")
+
+add_custom_command(
+    OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
+    COMMAND /bin/sh -c "${CMAKE_AR} -M < ${SYCL_CKKS_MRI_SCRIPT}"
+    COMMAND ${CMAKE_RANLIB} ${SYCL_CKKS_MERGED_ARCHIVE}
+    DEPENDS sycl_ckks_accelerator ${SYCL_CKKS_NTT_RTL_ARCHIVE} ${SYCL_CKKS_IFFT_RTL_ARCHIVE} ${SYCL_CKKS_MRI_SCRIPT}
+    COMMENT "Merging SYCL accelerator and active RTL archives into opaque static library"
+    VERBATIM
 )
 
+add_custom_target(sycl_ckks_accelerator_merged ALL
+    DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
+)
+
+# Downstream executables must still use the Intel SYCL/FPGA emulator link path
+# so icpx performs the final device-image link from this opaque static archive.
 target_link_options(sycl_ckks_accelerator INTERFACE
     -fsycl
+    -std=c++17
+    -Rno-debug-disables-optimization
+    -DCSL_USE_GMP
+    -DCSL_SYCL
+    -Wno-return-type-c-linkage
+    -qactypes
     -fintelfpga
+    -DFPGA_EMULATOR
+    -O0
     LINKER:--allow-multiple-definition
 )
 
-install(TARGETS sycl_ckks_accelerator
-    EXPORT sycl_ckks_acceleratorTargets
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin
-)
-
-install(DIRECTORY include/ DESTINATION include)
-install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a
-    ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lanes_double_253.a
+install(FILES ${SYCL_CKKS_MERGED_ARCHIVE}
     DESTINATION lib
+    RENAME libsycl_ckks_accelerator.a
 )
-install(EXPORT sycl_ckks_acceleratorTargets
-    NAMESPACE sycl_ckks_accelerator::
-    DESTINATION lib/cmake/sycl_ckks_accelerator
-)
+install(DIRECTORY include/ DESTINATION include)
