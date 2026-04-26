@@ -4,25 +4,40 @@ project(sycl_ckks_accelerator VERSION 0.1.0 LANGUAGES CXX)
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
 set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report builds")
 
-add_library(sycl_ckks_accelerator STATIC
+# Compatibility alias so workstation invocations using -DFPGA_DEVICE=... are
+# consumed by this project instead of being reported as unused by CMake.
+if(DEFINED FPGA_DEVICE AND NOT FPGA_DEVICE STREQUAL "")
+    set(SYCL_CKKS_FPGA_DEVICE "${FPGA_DEVICE}" CACHE STRING "FPGA target device for hardware/report builds" FORCE)
+endif()
+
+add_library(sycl_ckks_accelerator_obj OBJECT
     src/SYCL_ckks_sym.cpp
+)
+
+add_library(sycl_ckks_accelerator STATIC
+    $<TARGET_OBJECTS:sycl_ckks_accelerator_obj>
 )
 
 add_library(sycl_ckks_accelerator::sycl_ckks_accelerator ALIAS sycl_ckks_accelerator)
 
+target_compile_features(sycl_ckks_accelerator_obj PUBLIC cxx_std_17)
 target_compile_features(sycl_ckks_accelerator PUBLIC cxx_std_17)
+
+target_include_directories(sycl_ckks_accelerator_obj
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include_internal
+        ${CMAKE_CURRENT_SOURCE_DIR}/rtl
+)
 
 target_include_directories(sycl_ckks_accelerator
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/include_internal
-        ${CMAKE_CURRENT_SOURCE_DIR}/rtl
 )
 
-target_compile_options(sycl_ckks_accelerator PRIVATE
+target_compile_options(sycl_ckks_accelerator_obj PRIVATE
     -fsycl
     -fintelfpga
     -Rno-debug-disables-optimization
@@ -33,9 +48,11 @@ target_compile_options(sycl_ckks_accelerator PRIVATE
 )
 
 if(SYCL_CKKS_FPGA_HARDWARE)
-    target_compile_definitions(sycl_ckks_accelerator PRIVATE FPGA_HARDWARE=1)
+    message(STATUS "SYCL_CKKS hardware mode enabled; FPGA target: ${SYCL_CKKS_FPGA_DEVICE}")
+    target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE FPGA_HARDWARE=1)
 else()
-    target_compile_definitions(sycl_ckks_accelerator PRIVATE FPGA_EMULATOR=1)
+    message(STATUS "SYCL_CKKS emulator mode enabled")
+    target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE FPGA_EMULATOR=1)
 endif()
 
 set(SYCL_CKKS_NTT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a)
@@ -64,6 +81,24 @@ add_custom_command(
 add_custom_target(sycl_ckks_accelerator_merged ALL
     DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
 )
+
+if(SYCL_CKKS_FPGA_HARDWARE)
+    add_custom_target(sycl_ckks_accelerator_report
+        COMMAND ${CMAKE_CXX_COMPILER}
+                -fsycl
+                -fintelfpga
+                -Xshardware
+                -Xstarget=${SYCL_CKKS_FPGA_DEVICE}
+                -fsycl-link=early
+                -o ${CMAKE_CURRENT_BINARY_DIR}/sycl_ckks_accelerator_report.a
+                $<TARGET_OBJECTS:sycl_ckks_accelerator_obj>
+                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        DEPENDS sycl_ckks_accelerator_obj ${SYCL_CKKS_NTT_RTL_ARCHIVE} ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        COMMENT "Running Intel FPGA early device link for board ${SYCL_CKKS_FPGA_DEVICE}"
+        VERBATIM
+    )
+endif()
 
 # Downstream executables must still use the Intel SYCL/FPGA emulator link path
 # so icpx performs the final device-image link from this opaque static archive.
