@@ -22,19 +22,21 @@ public:
             ifft4k_base_DUT* rtl_instance = fhe_ifft_4k_4lanes_double_253_new_instance();
 #endif
 
-            // RTL pipeline latency: 3773 cycles (measured in the test harness).
-            // Total iterations = input blocks + pipeline drain.
-            constexpr size_t RTL_PIPELINE = 3773;
-            constexpr size_t TOTAL_ITERATIONS = NUM_BLOCKS + RTL_PIPELINE;
+            // The RTL IFFT consumes a full 4096-point frame. Use blocking reads
+            // for the input frame so startup skew between EntryKernel and IFFTKernel
+            // cannot turn missing pipe data into dropped samples. Then keep draining
+            // the RTL until exactly NUM_BLOCKS valid output blocks are forwarded.
+            size_t input_count = 0;
             size_t output_count = 0;
 
-            [[intel::initiation_interval(1)]]
-            for (size_t cycle = 0; cycle < TOTAL_ITERATIONS; ++cycle) {
+            while (output_count < NUM_BLOCKS) {
                 bool input_valid = false;
                 encoding_block block{};
 
-                if (cycle < NUM_BLOCKS) {
-                    block = SharedToIFFTPipe::read(input_valid);
+                if (input_count < NUM_BLOCKS) {
+                    block = SharedToIFFTPipe::read();
+                    input_valid = true;
+                    input_count++;
                 }
 
                 fhe_ifft_4k_4lanes_double_253_input_t hw_in;

@@ -1,6 +1,8 @@
 # Build/install artifacts
 build/
 install/
+build-report-*/
+logs/
 
 # CMake generated files
 CMakeCache.txt
