@@ -2,6 +2,7 @@
 build/
 install/
 build-report-*/
+build-kernel-tests-*/
 logs/
 
 # CMake generated files
