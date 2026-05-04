@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(sycl_ckks_accelerator VERSION 0.1.0 LANGUAGES CXX)
 
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
+option(SYCL_CKKS_BUILD_KERNEL_TESTS "Build individual kernel test harnesses" OFF)
 set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report builds")
 
 # Compatibility alias so workstation invocations using -DFPGA_DEVICE=... are
@@ -121,3 +122,8 @@ install(FILES ${SYCL_CKKS_MERGED_ARCHIVE}
     RENAME libsycl_ckks_accelerator.a
 )
 install(DIRECTORY include/ DESTINATION include)
+
+if(SYCL_CKKS_BUILD_KERNEL_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
