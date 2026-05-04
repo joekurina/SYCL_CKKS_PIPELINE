@@ -112,10 +112,10 @@ index a1454bd..c84dabd 100644
  set(SE_TESTS_SOURCE_FILES ${SE_TESTS_SOURCE_FILES} PARENT_SCOPE)
 diff --git a/device/test/SYCL_ckks_tests_sym.c b/device/test/SYCL_ckks_tests_sym.c
 new file mode 100644
-index 0000000..0965002
+index 0000000..13670d2
 --- /dev/null
 +++ b/device/test/SYCL_ckks_tests_sym.c
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,300 @@
 +/**
 +@file SYCL_ckks_test_sym.c
 +*/
@@ -140,12 +140,43 @@ index 0000000..0965002
 +#include "util_print.h"
 +#include "sycl_ckks_accelerator/SYCL_ckks_sym.h"
 +
++typedef enum SYCLSaveMode {
++    SYCL_SAVE_MODE_FULL = 0,
++    SYCL_SAVE_MODE_C0_ONLY,
++    SYCL_SAVE_MODE_PTE_ONLY,
++    SYCL_SAVE_MODE_S_ONLY
++} SYCLSaveMode;
++
 +static void prepare_parms_for_prime(const Parms *base, Parms *dst, size_t prime_idx, ZZ *s_small)
 +{
 +    *dst = *base;
 +    ckks_reset_primes(dst);
 +    for (size_t step = 0; step < prime_idx; ++step) {
 +        ckks_next_prime_sym(dst, s_small);
++    }
++}
++
++static SYCLSaveMode get_sycl_save_mode(void)
++{
++    const char *mode = getenv("SE_SYCL_SAVE_MODE");
++    if (mode == NULL || mode[0] == '\0') return SYCL_SAVE_MODE_FULL;
++    if (strcmp(mode, "full") == 0) return SYCL_SAVE_MODE_FULL;
++    if (strcmp(mode, "c0-only") == 0) return SYCL_SAVE_MODE_C0_ONLY;
++    if (strcmp(mode, "pte-only") == 0) return SYCL_SAVE_MODE_PTE_ONLY;
++    if (strcmp(mode, "s-only") == 0) return SYCL_SAVE_MODE_S_ONLY;
++
++    printf("Unknown SE_SYCL_SAVE_MODE='%s'; valid values: full, c0-only, pte-only, s-only\n", mode);
++    return SYCL_SAVE_MODE_FULL;
++}
++
++static const char *sycl_save_mode_name(SYCLSaveMode mode)
++{
++    switch (mode) {
++    case SYCL_SAVE_MODE_C0_ONLY: return "c0-only";
++    case SYCL_SAVE_MODE_PTE_ONLY: return "pte-only";
++    case SYCL_SAVE_MODE_S_ONLY: return "s-only";
++    case SYCL_SAVE_MODE_FULL:
++    default: return "full";
 +    }
 +}
 +
@@ -181,6 +212,14 @@ index 0000000..0965002
 +    SE_PRNG error_prng;
 +
 +    bool allocation_success = true;
++    SYCLSaveMode save_mode = get_sycl_save_mode();
++    bool save_s = (save_mode == SYCL_SAVE_MODE_FULL || save_mode == SYCL_SAVE_MODE_S_ONLY);
++    bool save_pte = (save_mode == SYCL_SAVE_MODE_FULL || save_mode == SYCL_SAVE_MODE_PTE_ONLY);
++    bool run_verifier = (save_mode == SYCL_SAVE_MODE_FULL);
++
++    printf("[SYCL smoke] SE_SYCL_SAVE_MODE=%s save_s=%d save_pte=%d verifier=%d\n",
++        sycl_save_mode_name(save_mode), save_s ? 1 : 0, save_pte ? 1 : 0, run_verifier ? 1 : 0);
++    fflush(stdout);
 +
 +    encoding_buffer = (complex_double *)calloc(n, sizeof(complex_double));
 +    if (!encoding_buffer) { allocation_success = false; goto cleanup; }
@@ -292,13 +331,31 @@ index 0000000..0965002
 +            prng_randomize_reset(&shareable_prng, NULL);
 +        }
 +
++        uint32_t **s_save_arg = save_s ? (uint32_t**)s_test_save : NULL;
++        uint32_t **ntt_pte_arg = save_pte ? (uint32_t**)ntt_pte : NULL;
++
++        printf("[SYCL smoke] before SYCL_encrypt test=%zu mode=%s\n",
++            testnum, sycl_save_mode_name(save_mode));
++        fflush(stdout);
++
 +        SYCL_encrypt(
 +            n, scales, mod_values, const_ratios,
 +            encoding_buffer, error_samples,
 +            (const uint32_t* const*)expanded_s, (const uint32_t* const*)uniform_poly,
 +            (uint32_t**)c0, (uint32_t**)c1,
-+            (uint32_t**)s_test_save, (uint32_t**)c1_test_save,
-+            (uint32_t**)ntt_pte);
++            s_save_arg, (uint32_t**)c1_test_save,
++            ntt_pte_arg);
++
++        printf("[SYCL smoke] after SYCL_encrypt test=%zu mode=%s\n",
++            testnum, sycl_save_mode_name(save_mode));
++        fflush(stdout);
++
++        if (!run_verifier) {
++            printf("[SYCL smoke] skipping verifier for diagnostic mode=%s because required save outputs are disabled\n",
++                sycl_save_mode_name(save_mode));
++            fflush(stdout);
++            break;
++        }
 +
 +        for (size_t p = 0; p < moduli_count; ++p)
 +        {
