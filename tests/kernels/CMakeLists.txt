@@ -1,5 +1,9 @@
 include(${CMAKE_CURRENT_LIST_DIR}/common/kernel_test_cmake.cmake)
 
+option(SYCL_CKKS_REGISTER_RTL_EMULATOR_CTESTS
+       "Register RTL-backed emulator kernel tests with CTest. Current RTL archives may require a compiler-compatible emulator toolchain."
+       OFF)
+
 set(CKKS_KERNEL_TEST_COMMON_INCLUDE
     ${CMAKE_CURRENT_SOURCE_DIR}/common
 )
@@ -18,23 +22,28 @@ endforeach()
 
 add_ckks_kernel_test(ckks_test_ifft ifft/ifft_harness.cpp CKKS_TEST_USES_IFFT_RTL 1)
 
-set(CKKS_KERNEL_TEST_EMU_TARGETS
+set(CKKS_KERNEL_TEST_EMU_NONRTL_TARGETS
     ckks_test_entry_emu
+)
+set(CKKS_KERNEL_TEST_EMU_RTL_TARGETS
     ckks_test_ifft_emu
 )
 foreach(P RANGE 0 2)
-    list(APPEND CKKS_KERNEL_TEST_EMU_TARGETS
+    list(APPEND CKKS_KERNEL_TEST_EMU_NONRTL_TARGETS
         ckks_test_exit_c0_p${P}_emu
         ckks_test_exit_ntt_a_p${P}_emu
         ckks_test_exit_ntt_b_p${P}_emu
         ckks_test_scale_reduce_p${P}_emu
         ckks_test_poly_mult_neg_add_p${P}_emu
+    )
+    list(APPEND CKKS_KERNEL_TEST_EMU_RTL_TARGETS
         ckks_test_ntt_a_p${P}_emu
         ckks_test_ntt_b_p${P}_emu
     )
 endforeach()
 
-add_custom_target(ckks_kernel_tests_emu DEPENDS ${CKKS_KERNEL_TEST_EMU_TARGETS})
+add_custom_target(ckks_kernel_tests_emu DEPENDS ${CKKS_KERNEL_TEST_EMU_NONRTL_TARGETS})
+add_custom_target(ckks_kernel_tests_emu_rtl DEPENDS ${CKKS_KERNEL_TEST_EMU_RTL_TARGETS})
 
 set(CKKS_KERNEL_TEST_REPORT_TARGETS
     ckks_test_entry_report
