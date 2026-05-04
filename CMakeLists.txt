@@ -64,26 +64,66 @@ set(SYCL_CKKS_IFFT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lane
 set(SYCL_CKKS_MERGED_ARCHIVE ${SYCL_CKKS_ACCELERATOR_ARCHIVE})
 set(SYCL_CKKS_MRI_SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/merge_sycl_ckks_accelerator_${SYCL_CKKS_ACCELERATOR_MODE}.mri)
 
-# This archive target intentionally uses ar/ranlib instead of invoking icpx as a
-# final linker. The accelerator has no main(); downstream SEAL-Embedded links the
-# archive into its executable, where icpx performs the final SYCL/FPGA device link.
-file(WRITE ${SYCL_CKKS_MRI_SCRIPT}
-    "CREATE ${SYCL_CKKS_MERGED_ARCHIVE}\n"
-    "ADDLIB ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator.a\n"
-    "ADDLIB ${SYCL_CKKS_NTT_RTL_ARCHIVE}\n"
-    "ADDLIB ${SYCL_CKKS_IFFT_RTL_ARCHIVE}\n"
-    "SAVE\n"
-    "END\n")
+if(SYCL_CKKS_FPGA_HARDWARE)
+    # Full IA-840F hardware image archive. This intentionally uses
+    # -fsycl-link=image: the accelerator has no main(), but downstream
+    # SEAL-Embedded needs the reusable FPGA image/static archive produced by
+    # the real AoT hardware compile. A plain ar archive is not sufficient, and
+    # an icpx final executable link without -fsycl-link=image fails looking for
+    # main().
+    add_custom_command(
+        OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND ${CMAKE_CXX_COMPILER}
+                -v
+                -fsycl
+                -std=c++17
+                -Rno-debug-disables-optimization
+                -DCSL_USE_GMP
+                -DCSL_SYCL
+                -Wno-return-type-c-linkage
+                -qactypes
+                -fintelfpga
+                -Xshardware
+                -Xstarget=${SYCL_CKKS_FPGA_DEVICE}
+                -DFPGA_HARDWARE
+                -fsycl-link=image
+                -I${CMAKE_CURRENT_SOURCE_DIR}
+                -I${CMAKE_CURRENT_SOURCE_DIR}/include
+                -I${CMAKE_CURRENT_SOURCE_DIR}/include_internal
+                -I${CMAKE_CURRENT_SOURCE_DIR}/rtl
+                -o ${SYCL_CKKS_MERGED_ARCHIVE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/SYCL_ckks_sym.cpp
+                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/SYCL_ckks_sym.cpp
+                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        COMMENT "Running full Intel FPGA hardware compile for reusable archive ${SYCL_CKKS_MERGED_ARCHIVE}"
+        VERBATIM
+    )
+else()
+    # Emulator/default integration archive. This is just an opaque static
+    # archive for downstream emulator builds; no FPGA AoT compile is expected.
+    file(WRITE ${SYCL_CKKS_MRI_SCRIPT}
+        "CREATE ${SYCL_CKKS_MERGED_ARCHIVE}\n"
+        "ADDLIB ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator.a\n"
+        "ADDLIB ${SYCL_CKKS_NTT_RTL_ARCHIVE}\n"
+        "ADDLIB ${SYCL_CKKS_IFFT_RTL_ARCHIVE}\n"
+        "SAVE\n"
+        "END\n")
 
-add_custom_command(
-    OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
-    COMMAND /bin/sh -c "${CMAKE_AR} -M < ${SYCL_CKKS_MRI_SCRIPT}"
-    COMMAND ${CMAKE_RANLIB} ${SYCL_CKKS_MERGED_ARCHIVE}
-    DEPENDS sycl_ckks_accelerator ${SYCL_CKKS_NTT_RTL_ARCHIVE} ${SYCL_CKKS_IFFT_RTL_ARCHIVE} ${SYCL_CKKS_MRI_SCRIPT}
-    COMMENT "Creating ${SYCL_CKKS_ACCELERATOR_MODE} SYCL accelerator static archive ${SYCL_CKKS_MERGED_ARCHIVE}"
-    VERBATIM
-)
+    add_custom_command(
+        OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND /bin/sh -c "${CMAKE_AR} -M < ${SYCL_CKKS_MRI_SCRIPT}"
+        COMMAND ${CMAKE_RANLIB} ${SYCL_CKKS_MERGED_ARCHIVE}
+        DEPENDS sycl_ckks_accelerator ${SYCL_CKKS_NTT_RTL_ARCHIVE} ${SYCL_CKKS_IFFT_RTL_ARCHIVE} ${SYCL_CKKS_MRI_SCRIPT}
+        COMMENT "Creating emulator SYCL accelerator static archive ${SYCL_CKKS_MERGED_ARCHIVE}"
+        VERBATIM
+    )
+endif()
 
 add_custom_target(sycl_ckks_accelerator_merged ALL
     DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
@@ -92,7 +132,7 @@ add_custom_target(sycl_ckks_accelerator_merged ALL
 if(SYCL_CKKS_FPGA_HARDWARE)
     add_custom_target(sycl_ckks_accelerator_hw_archive
         DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
-        COMMENT "Hardware-mode accelerator archive ready for SEAL-Embedded: ${SYCL_CKKS_MERGED_ARCHIVE}"
+        COMMENT "Full hardware accelerator archive ready for SEAL-Embedded: ${SYCL_CKKS_MERGED_ARCHIVE}"
     )
 
     add_custom_target(sycl_ckks_accelerator_report
@@ -130,8 +170,6 @@ target_link_options(sycl_ckks_accelerator INTERFACE
     -fintelfpga
     $<$<BOOL:${SYCL_CKKS_FPGA_HARDWARE}>:-DFPGA_HARDWARE>
     $<$<NOT:$<BOOL:${SYCL_CKKS_FPGA_HARDWARE}>>:-DFPGA_EMULATOR>
-    $<$<BOOL:${SYCL_CKKS_FPGA_HARDWARE}>:-Xshardware>
-    $<$<BOOL:${SYCL_CKKS_FPGA_HARDWARE}>:-Xstarget=${SYCL_CKKS_FPGA_DEVICE}>
     $<$<NOT:$<BOOL:${SYCL_CKKS_FPGA_HARDWARE}>>:-O0>
     LINKER:--allow-multiple-definition
 )
