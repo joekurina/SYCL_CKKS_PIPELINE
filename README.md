@@ -107,12 +107,18 @@ The first-pass SEAL integration should use a simple path variable:
 
 Do not add polished `find_package(...)` integration until the simple path-based build is working.
 
-## Smoke test policy
+## FPGA Test policy
 
-Use the SEAL-side short-run mode once implemented:
+For accelerator-enabled SEAL-Embedded builds, the default executable path should be the FPGA Test:
 
 ```bash
-SE_TEST_MODE=sycl-smoke /path/to/seal_embedded_tests
+/path/to/seal_embedded_tests
 ```
 
-Do not run the full verbose test executable by default.
+You can also request it explicitly:
+
+```bash
+SE_TEST_MODE=fpga-test /path/to/seal_embedded_tests
+```
+
+Use `SE_TEST_MODE=all` only when you intentionally want the original CPU-oriented SEAL test suite instead of the FPGA Test path.

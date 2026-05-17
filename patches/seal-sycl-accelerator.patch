@@ -1,0 +1,506 @@
+diff --git a/device/CMakeLists.txt b/device/CMakeLists.txt
+index 9f7ad6d..bbbbae1 100644
+--- a/device/CMakeLists.txt
++++ b/device/CMakeLists.txt
+@@ -13,6 +13,12 @@ option(SE_BUILD_LOCAL "Build for native instead of device" ON)
+ # -- 2. If !local, m4 or a7 (on = m4)
+ option(SE_BUILD_M4 "Build for M4 instead of for A7" OFF)
+ 
++# -- Optional SYCL CKKS accelerator integration for local tests
++option(SE_ENABLE_SYCL_ACCELERATOR "Build local tests with external SYCL CKKS accelerator" OFF)
++option(SE_SYCL_FPGA_HARDWARE "Link tests against a prebuilt FPGA hardware accelerator image" OFF)
++set(SYCL_CKKS_ACCELERATOR_ROOT "" CACHE PATH "Path to SYCL CKKS accelerator repo or install root containing include/")
++set(SYCL_CKKS_ACCELERATOR_LIBRARY "" CACHE FILEPATH "Exact path to prebuilt SYCL CKKS accelerator archive")
++
+ # -- 3. If m4, azure sphere or nrf (on = sphere)
+ # -- NOTE: Stack size issue with Sphere m4 prevents this deployment from running in most cases
+ option(SE_M4_IS_SPHERE "Use Azure Sphere m4" OFF)
+@@ -30,7 +36,7 @@ if(NOT SE_BUILD_LOCAL)
+     endif()
+ endif()
+ 
+-project(SEAL_EMBEDDED VERSION 1.1.0 LANGUAGES C ASM)
++project(SEAL_EMBEDDED VERSION 1.1.0 LANGUAGES C CXX ASM)
+ 
+ #################
+ # Configuration #
+@@ -207,6 +213,28 @@ if(NOT SE_BUILD_LOCAL)
+     endif()
+ endif()
+ 
++if(SE_ENABLE_SYCL_ACCELERATOR)
++    if(NOT SE_BUILD_LOCAL)
++        message(FATAL_ERROR "SE_ENABLE_SYCL_ACCELERATOR is currently supported only with SE_BUILD_LOCAL=ON")
++    endif()
++    if(NOT SYCL_CKKS_ACCELERATOR_ROOT)
++        message(FATAL_ERROR "SE_ENABLE_SYCL_ACCELERATOR requires SYCL_CKKS_ACCELERATOR_ROOT")
++    endif()
++    if(SYCL_CKKS_ACCELERATOR_LIBRARY)
++        set(SE_SYCL_ACCELERATOR_LIBRARY "${SYCL_CKKS_ACCELERATOR_LIBRARY}")
++    else()
++        set(SE_SYCL_ACCELERATOR_LIBRARY "${SYCL_CKKS_ACCELERATOR_ROOT}/lib/libsycl_ckks_accelerator.a")
++    endif()
++    if(NOT EXISTS "${SE_SYCL_ACCELERATOR_LIBRARY}")
++        message(FATAL_ERROR "SYCL CKKS accelerator library not found: ${SE_SYCL_ACCELERATOR_LIBRARY}")
++    endif()
++    if(NOT EXISTS "${SYCL_CKKS_ACCELERATOR_ROOT}/include/sycl_ckks_accelerator/SYCL_ckks_sym.h")
++        message(FATAL_ERROR "SYCL CKKS accelerator header not found under: ${SYCL_CKKS_ACCELERATOR_ROOT}/include")
++    endif()
++    find_library(SE_GMP_LIBRARY NAMES gmp libgmp.so.10 REQUIRED)
++    add_definitions(-DSE_ENABLE_SYCL_ACCELERATOR=1)
++endif()
++
+ if(SE_BUILD_LOCAL)
+     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY  ${CMAKE_CURRENT_BINARY_DIR}/bin)
+     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY  ${CMAKE_CURRENT_BINARY_DIR}/bin)
+@@ -260,6 +288,13 @@ elseif(SE_BUILD_TYPE STREQUAL "Tests")
+     if(SE_BUILD_LOCAL)
+         add_executable(seal_embedded_tests ${SE_TESTS_SOURCE_FILES})
+         target_link_libraries(seal_embedded_tests PRIVATE m gcc_s c seal_embedded)
++        if(SE_ENABLE_SYCL_ACCELERATOR)
++            set_target_properties(seal_embedded_tests PROPERTIES LINKER_LANGUAGE CXX)
++            target_include_directories(seal_embedded_tests PRIVATE "${SYCL_CKKS_ACCELERATOR_ROOT}/include")
++            target_compile_definitions(seal_embedded_tests PRIVATE SE_ENABLE_SYCL_ACCELERATOR=1)
++            target_link_options(seal_embedded_tests PRIVATE -fsycl -std=c++17 -Rno-debug-disables-optimization -DCSL_USE_GMP -DCSL_SYCL -Wno-return-type-c-linkage -qactypes -fintelfpga -Wl,--allow-multiple-definition)
++            target_link_libraries(seal_embedded_tests PRIVATE "${SE_SYCL_ACCELERATOR_LIBRARY}" "${SE_GMP_LIBRARY}")
++        endif()
+     else()
+         add_executable(${PROJECT_NAME} ${SE_TESTS_SOURCE_FILES})
+         if(SE_BUILD_M4)
+diff --git a/device/test/CMakeLists.txt b/device/test/CMakeLists.txt
+index a1454bd..c84dabd 100644
+--- a/device/test/CMakeLists.txt
++++ b/device/test/CMakeLists.txt
+@@ -17,4 +17,10 @@ set(SE_TESTS_SOURCE_FILES ${SE_TESTS_SOURCE_FILES}
+ 	${CMAKE_CURRENT_LIST_DIR}/main.c
+ )
+ 
++if(SE_ENABLE_SYCL_ACCELERATOR)
++	set(SE_TESTS_SOURCE_FILES ${SE_TESTS_SOURCE_FILES}
++		${CMAKE_CURRENT_LIST_DIR}/SYCL_ckks_tests_sym.c
++	)
++endif()
++
+ set(SE_TESTS_SOURCE_FILES ${SE_TESTS_SOURCE_FILES} PARENT_SCOPE)
+diff --git a/device/test/main.c b/device/test/main.c
+index 511802c..2f011b8 100644
+--- a/device/test/main.c
++++ b/device/test/main.c
+@@ -12,6 +12,9 @@ API usage.
+ 
+ #include "defines.h"
+ 
++#include <stdlib.h>
++#include <string.h>
++
+ #ifndef SE_DISABLE_TESTING_CAPABILITY
+ #include "util_print.h"
+ 
+@@ -35,6 +38,11 @@ extern void test_ckks_encode_encrypt_asym(size_t n, size_t nprimes);
+ extern void test_ckks_api_sym(void);
+ extern void test_ckks_api_asym(void);
+ 
++#ifdef SE_ENABLE_SYCL_ACCELERATOR
++extern void SYCL_test_ckks_encode_encrypt_sym(size_t n, size_t nprimes);
++extern void SYCL_test_enc_zero_sym(size_t n, size_t nprimes);
++#endif
++
+ #ifdef SE_ON_SPHERE_M4
+ #include "mt3620.h"
+ #include "os_hal_gpt.h"
+@@ -99,44 +107,60 @@ int main(void)
+     const size_t nprimes = SE_NPRIMES;
+ #endif
+ 
+-    test_sample_poly_uniform(n);
+-    test_sample_poly_ternary(n);
+-    test_sample_poly_ternary_small(n);  // Only useful when SE_USE_MALLOC is defined
++#ifdef SE_ENABLE_SYCL_ACCELERATOR
++    const char *se_test_mode = getenv("SE_TEST_MODE");
++    if (se_test_mode == NULL || se_test_mode[0] == '\0' || strcmp(se_test_mode, "fpga-test") == 0) {
++        printf("[FPGA Test] running hardware accelerator test (SE_TEST_MODE=%s)\n",
++            (se_test_mode == NULL || se_test_mode[0] == '\0') ? "<default>" : se_test_mode);
++        fflush(stdout);
++        SYCL_test_ckks_encode_encrypt_sym(n, nprimes);
++        printf("[FPGA Test] completed hardware accelerator test\n");
++        exit(0);
++    }
++    if (strcmp(se_test_mode, "all") != 0) {
++        printf("Unknown SE_TEST_MODE='%s'; valid values for accelerator build: fpga-test, all\n", se_test_mode);
++        exit(1);
++    }
++#endif
++
++        test_sample_poly_uniform(n);
++        test_sample_poly_ternary(n);
++        test_sample_poly_ternary_small(n);  // Only useful when SE_USE_MALLOC is defined
+ 
+-    test_add_uint();
+-    test_mult_uint();
++        test_add_uint();
++        test_mult_uint();
+ 
+-    test_barrett_reduce();
+-    test_barrett_reduce_wide();
++        test_barrett_reduce();
++        test_barrett_reduce_wide();
+ 
+-    test_add_mod();
+-    test_neg_mod();
+-    test_mul_mod();
++        test_add_mod();
++        test_neg_mod();
++        test_mul_mod();
+ 
+-    // -- Note: This test sometimes takes a while to run
+-    //    because it uses schoolbook multiplication
+-    // -- Comment it out unless you need to test it
+-    // test_poly_mult_ntt(n, nprimes);
++        // -- Note: This test sometimes takes a while to run
++        //    because it uses schoolbook multiplication
++        // -- Comment it out unless you need to test it
++        // test_poly_mult_ntt(n, nprimes);
+ 
+-    test_fft(n);
++        test_fft(n);
+ 
+-    test_enc_zero_sym(n, nprimes);
+-    test_enc_zero_asym(n, nprimes);
++        test_enc_zero_sym(n, nprimes);
++        test_enc_zero_asym(n, nprimes);
+ 
+-    test_ckks_encode(n);
++        test_ckks_encode(n);
+ 
+-    // -- Main tests
+-    test_ckks_encode_encrypt_sym(n, nprimes);
+-    test_ckks_encode_encrypt_asym(n, nprimes);
++        // -- Main tests
++        test_ckks_encode_encrypt_sym(n, nprimes);
++        test_ckks_encode_encrypt_asym(n, nprimes);
+ 
+-    // -- Run these tests to verify api
+-    // -- Check the result with the adapter by writing output to a text file
+-    //    and passing that to the adapter "verify ciphertexts" functionality
+-    // test_ckks_api_sym();
+-    // test_ckks_api_asym();
++        // -- Run these tests to verify api
++        // -- Check the result with the adapter by writing output to a text file
++        //    and passing that to the adapter "verify ciphertexts" functionality
++        // test_ckks_api_sym();
++        // test_ckks_api_asym();
+ 
+-    // test_network_basic();
+-    // test_network();
++        // test_network_basic();
++        // test_network();
+ 
+     printf("...done with all tests. All tests passed.\n");
+     exit(0);
+diff --git a/device/test/SYCL_ckks_tests_sym.c b/device/test/SYCL_ckks_tests_sym.c
+new file mode 100644
+index 0000000..f15d29d
+--- /dev/null
++++ b/device/test/SYCL_ckks_tests_sym.c
+@@ -0,0 +1,300 @@
++/**
++@file SYCL_ckks_test_sym.c
++*/
++
++#include <math.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "ckks_common.h"
++#include "ckks_sym.h"
++#include "ckks_tests_common.h"
++#include "defines.h"
++#include "fft.h"
++#include "fileops.h"
++#include "ntt.h"
++#include "polymodarith.h"
++#include "polymodmult.h"
++#include "sample.h"
++#include "test_common.h"
++#include "util_print.h"
++#include "sycl_ckks_accelerator/SYCL_ckks_sym.h"
++
++typedef enum SYCLSaveMode {
++    SYCL_SAVE_MODE_FULL = 0,
++    SYCL_SAVE_MODE_C0_ONLY,
++    SYCL_SAVE_MODE_PTE_ONLY,
++    SYCL_SAVE_MODE_S_ONLY
++} SYCLSaveMode;
++
++static void prepare_parms_for_prime(const Parms *base, Parms *dst, size_t prime_idx, ZZ *s_small)
++{
++    *dst = *base;
++    ckks_reset_primes(dst);
++    for (size_t step = 0; step < prime_idx; ++step) {
++        ckks_next_prime_sym(dst, s_small);
++    }
++}
++
++static SYCLSaveMode get_sycl_save_mode(void)
++{
++    const char *mode = getenv("SE_SYCL_SAVE_MODE");
++    if (mode == NULL || mode[0] == '\0') return SYCL_SAVE_MODE_FULL;
++    if (strcmp(mode, "full") == 0) return SYCL_SAVE_MODE_FULL;
++    if (strcmp(mode, "c0-only") == 0) return SYCL_SAVE_MODE_C0_ONLY;
++    if (strcmp(mode, "pte-only") == 0) return SYCL_SAVE_MODE_PTE_ONLY;
++    if (strcmp(mode, "s-only") == 0) return SYCL_SAVE_MODE_S_ONLY;
++
++    printf("Unknown SE_SYCL_SAVE_MODE='%s'; valid values: full, c0-only, pte-only, s-only\n", mode);
++    return SYCL_SAVE_MODE_FULL;
++}
++
++static const char *sycl_save_mode_name(SYCLSaveMode mode)
++{
++    switch (mode) {
++    case SYCL_SAVE_MODE_C0_ONLY: return "c0-only";
++    case SYCL_SAVE_MODE_PTE_ONLY: return "pte-only";
++    case SYCL_SAVE_MODE_S_ONLY: return "s-only";
++    case SYCL_SAVE_MODE_FULL:
++    default: return "full";
++    }
++}
++
++void SYCL_test_ckks_sym_base(size_t n, size_t nprimes, bool test_message)
++{
++    const size_t moduli_count = SYCL_NUM_MODULI;
++    Parms parms;
++    parms.sample_s      = false;
++    parms.is_asymmetric = false;
++    parms.small_s       = true;
++    bool encode_only    = false;
++
++    if (!parms.sample_s) se_assert(parms.small_s);
++
++    complex_double *encoding_buffer = NULL;
++    int8_t *error_samples = NULL;
++    ZZ *c0[SYCL_NUM_MODULI] = {0};
++    ZZ *c1[SYCL_NUM_MODULI] = {0};
++    ZZ *expanded_s[SYCL_NUM_MODULI] = {0};
++    ZZ *uniform_poly[SYCL_NUM_MODULI] = {0};
++    uint16_t *index_map = NULL;
++    ZZ *ntt_pte[SYCL_NUM_MODULI] = {0};
++    ZZ *s_small = NULL;
++    flpt *v = NULL;
++    size_t vlen = n / 2;
++
++    ZZ *s_test_save[SYCL_NUM_MODULI] = {0};
++    ZZ *c1_test_save[SYCL_NUM_MODULI] = {0};
++    ZZ *temp_test_mem = NULL;
++
++    SE_PRNG prng;
++    SE_PRNG shareable_prng;
++    SE_PRNG error_prng;
++
++    bool allocation_success = true;
++    SYCLSaveMode save_mode = get_sycl_save_mode();
++    bool save_s = (save_mode == SYCL_SAVE_MODE_FULL || save_mode == SYCL_SAVE_MODE_S_ONLY);
++    bool save_pte = (save_mode == SYCL_SAVE_MODE_FULL || save_mode == SYCL_SAVE_MODE_PTE_ONLY);
++    bool run_verifier = (save_mode == SYCL_SAVE_MODE_FULL);
++
++    printf("[FPGA Test] SE_SYCL_SAVE_MODE=%s save_s=%d save_pte=%d verifier=%d\n",
++        sycl_save_mode_name(save_mode), save_s ? 1 : 0, save_pte ? 1 : 0, run_verifier ? 1 : 0);
++    fflush(stdout);
++
++    encoding_buffer = (complex_double *)calloc(n, sizeof(complex_double));
++    if (!encoding_buffer) { allocation_success = false; goto cleanup; }
++
++    error_samples = (int8_t *)calloc(n, sizeof(int8_t));
++    if (!error_samples) { allocation_success = false; goto cleanup; }
++
++    for (size_t i = 0; i < moduli_count; ++i) {
++        c0[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!c0[i]) { allocation_success = false; goto cleanup; }
++
++        c1[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!c1[i]) { allocation_success = false; goto cleanup; }
++
++        expanded_s[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!expanded_s[i]) { allocation_success = false; goto cleanup; }
++
++        uniform_poly[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!uniform_poly[i]) { allocation_success = false; goto cleanup; }
++
++        ntt_pte[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!ntt_pte[i]) { allocation_success = false; goto cleanup; }
++
++        s_test_save[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!s_test_save[i]) { allocation_success = false; goto cleanup; }
++
++        c1_test_save[i] = (ZZ *)calloc(n, sizeof(ZZ));
++        if (!c1_test_save[i]) { allocation_success = false; goto cleanup; }
++    }
++
++    size_t s_buf_size = parms.small_s ? (n / 16 + (n % 16 != 0)) : n;
++    s_small = (ZZ *)calloc(s_buf_size, sizeof(ZZ));
++    if (!s_small) { allocation_success = false; goto cleanup; }
++
++    if (test_message) {
++        v = (flpt *)calloc(vlen, sizeof(flpt));
++        if (!v) { allocation_success = false; goto cleanup; }
++    }
++
++#if defined(SE_INDEX_MAP_PERSIST) || defined(SE_INDEX_MAP_LOAD) || \
++    defined(SE_INDEX_MAP_LOAD_PERSIST) || defined(SE_INDEX_MAP_LOAD_PERSIST_SYM_LOAD_ASYM)
++    index_map = (uint16_t *)calloc(n, sizeof(uint16_t));
++    if (!index_map) { allocation_success = false; goto cleanup; }
++#endif
++
++    temp_test_mem = (ZZ *)calloc(4 * n, sizeof(ZZ));
++    if (!temp_test_mem) { allocation_success = false; goto cleanup; }
++
++    ckks_setup(n, nprimes, index_map, &parms);
++    print_test_banner("Symmetric Encryption", &parms);
++
++    ckks_setup_s(&parms, NULL, &prng, s_small);
++    if (encode_only) clear(s_small, s_buf_size);
++
++    for (size_t testnum = 0; testnum < 9; testnum++)
++    {
++        printf("-------------------- Test %zu -----------------------\n", testnum);
++        ckks_reset_primes(&parms);
++
++        if (test_message) {
++            set_encode_encrypt_test(testnum, vlen, v);
++            print_poly_flpt("v        ", v, vlen);
++        } else if (v) {
++            memset(v, 0, vlen * sizeof(flpt));
++        }
++
++        prng_randomize_reset(&shareable_prng, NULL);
++        prng_randomize_reset(&prng, NULL);
++        prng_randomize_reset(&error_prng, NULL);
++
++        se_assert(parms.nprimes == moduli_count);
++
++        Parms mod_parms[SYCL_NUM_MODULI];
++        double scales[SYCL_NUM_MODULI];
++        uint32_t mod_values[SYCL_NUM_MODULI];
++        uint32_t const_ratios[SYCL_NUM_MODULI * 2];
++
++        for (size_t p = 0; p < moduli_count; ++p) {
++            prepare_parms_for_prime(&parms, &mod_parms[p], p, s_small);
++            scales[p] = mod_parms[p].scale;
++            mod_values[p] = (uint32_t)mod_parms[p].curr_modulus->value;
++            const_ratios[p * 2] = mod_parms[p].curr_modulus->const_ratio[0];
++            const_ratios[p * 2 + 1] = mod_parms[p].curr_modulus->const_ratio[1];
++        }
++
++        memset(encoding_buffer, 0, n * sizeof(complex_double));
++        if (test_message && v != NULL && index_map != NULL) {
++            size_t slot_count = n / 2;
++            for (size_t i = 0; i < vlen; i++) {
++                uint16_t index1_rev = index_map[i];
++                uint16_t index2_rev = index_map[i + slot_count];
++                double val_real = (double)(v[i]);
++                ((double*)encoding_buffer)[2*index1_rev] = val_real;
++                ((double*)encoding_buffer)[2*index1_rev+1] = 0.0;
++                ((double*)encoding_buffer)[2*index2_rev] = val_real;
++                ((double*)encoding_buffer)[2*index2_rev+1] = 0.0;
++            }
++        }
++
++        for (size_t i = 0; i < n; i++) {
++            int8_t temp_buffer[1] = {0};
++            sample_poly_cbd_generic(1, &error_prng, temp_buffer);
++            error_samples[i] = temp_buffer[0];
++        }
++
++        for (size_t p = 0; p < moduli_count; ++p) {
++            expand_poly_ternary(s_small, &mod_parms[p], expanded_s[p]);
++            sample_poly_uniform(&mod_parms[p], &shareable_prng, uniform_poly[p]);
++            prng_randomize_reset(&shareable_prng, NULL);
++        }
++
++        uint32_t **s_save_arg = save_s ? (uint32_t**)s_test_save : NULL;
++        uint32_t **ntt_pte_arg = save_pte ? (uint32_t**)ntt_pte : NULL;
++
++        printf("[FPGA Test] before SYCL_encrypt test=%zu mode=%s\n",
++            testnum, sycl_save_mode_name(save_mode));
++        fflush(stdout);
++
++        SYCL_encrypt(
++            n, scales, mod_values, const_ratios,
++            encoding_buffer, error_samples,
++            (const uint32_t* const*)expanded_s, (const uint32_t* const*)uniform_poly,
++            (uint32_t**)c0, (uint32_t**)c1,
++            s_save_arg, (uint32_t**)c1_test_save,
++            ntt_pte_arg);
++
++        printf("[FPGA Test] after SYCL_encrypt test=%zu mode=%s\n",
++            testnum, sycl_save_mode_name(save_mode));
++        fflush(stdout);
++
++        if (!run_verifier) {
++            printf("[FPGA Test] skipping verifier for diagnostic mode=%s because required save outputs are disabled\n",
++                sycl_save_mode_name(save_mode));
++            fflush(stdout);
++            break;
++        }
++
++        for (size_t p = 0; p < moduli_count; ++p)
++        {
++            bool s_test_save_small = false;
++            check_decode_decrypt_inpl(
++                c0[p], c1_test_save[p], v, vlen,
++                s_test_save[p], s_test_save_small,
++                ntt_pte[p], index_map, &mod_parms[p], temp_test_mem);
++        }
++
++        if (!test_message) break;
++    }
++
++cleanup:
++    if (!allocation_success) {
++        printf("Aborting test due to memory allocation failure.\n");
++    }
++
++    free(encoding_buffer);
++    free(error_samples);
++    for (size_t i = 0; i < moduli_count; ++i) {
++        free(c0[i]);
++        free(c1[i]);
++        free(expanded_s[i]);
++        free(uniform_poly[i]);
++        free(ntt_pte[i]);
++        free(s_test_save[i]);
++        free(c1_test_save[i]);
++    }
++    free(s_small);
++    free(v);
++    free(index_map);
++    free(temp_test_mem);
++
++    delete_parameters(&parms);
++}
++
++/**
++Full encode + symmetric encrypt test
++@param[in] n        Polynomial ring degree
++@param[in] nprimes  # of modulus primes
++*/
++void SYCL_test_ckks_encode_encrypt_sym(size_t n, size_t nprimes)
++{
++    printf("Beginning tests for ckks encode + symmetric encrypt (SYCL Test)...\n");
++    bool test_message = 1;
++    SYCL_test_ckks_sym_base(n, nprimes, test_message);
++}
++
++/**
++Symmetric rlwe test only (message is the all-zeros vector)
++@param[in] n        Polynomial ring degree
++@param[in] nprimes  # of modulus primes
++*/
++void SYCL_test_enc_zero_sym(size_t n, size_t nprimes)
++{
++    printf("Beginning tests for rlwe symmetric encryption of 0 (SYCL Test)...\n");
++    bool test_message = 0;
++    SYCL_test_ckks_sym_base(n, nprimes, test_message);
++}
+\ No newline at end of file
