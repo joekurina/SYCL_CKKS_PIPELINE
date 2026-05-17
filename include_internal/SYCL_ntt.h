@@ -74,7 +74,6 @@ public:
             bool need_exit_write = false;
             u32x4 pending_output{};
 
-            [[intel::initiation_interval(1)]]
             while (output_count < NUM_BLOCKS) {
                 bool input_valid = false;
                 u32x4 input_block{};

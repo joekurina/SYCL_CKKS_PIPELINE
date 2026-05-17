@@ -35,7 +35,6 @@ public:
             using Pipes = PipeSet<P>;
             double n_inv = kernel_scale / static_cast<double>(POLY_N);
 
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
                 encoding_block enc = IFFTToScaleReducePipes::PipeAt<P>::read();
                 i8x4 err = ErrorToScaleReducePipes::PipeAt<P>::read();

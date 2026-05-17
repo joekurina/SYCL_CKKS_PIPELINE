@@ -32,7 +32,6 @@ public:
         h.single_task<ExitC0KernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
             using Pipes = PipeSet<P>;
 
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
                 output[blk] = Pipes::PolyAddToExitPipe::read();
             }
@@ -55,7 +54,6 @@ public:
         h.single_task<ExitNTTASKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
             using Pipes = PipeSet<P>;
 
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
                 output[blk] = Pipes::NTTAToExitPipe::read();
             }
@@ -78,7 +76,6 @@ public:
         h.single_task<ExitNTTBKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
             using Pipes = PipeSet<P>;
 
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
                 output[blk] = Pipes::NTTBToExitPipe::read();
             }
