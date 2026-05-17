@@ -2,12 +2,53 @@ cmake_minimum_required(VERSION 3.20)
 project(sycl_ckks_accelerator VERSION 0.1.0 LANGUAGES CXX)
 
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
-set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report builds")
+option(SYCL_CKKS_FPGA_SIMULATION "Build for FPGA simulator instead of emulator/hardware" OFF)
+option(SYCL_CKKS_SIMULATION_WAVEFORMS "Enable simulator waveform capture with -Xsghdl" OFF)
+set(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH "" CACHE STRING "Optional hierarchy depth for simulator waveform capture. Empty uses -Xsghdl default depth 1; 0 logs all hierarchy.")
+set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report/simulation builds")
+
+if(SYCL_CKKS_FPGA_HARDWARE AND SYCL_CKKS_FPGA_SIMULATION)
+    message(FATAL_ERROR "Choose only one FPGA backend: SYCL_CKKS_FPGA_HARDWARE or SYCL_CKKS_FPGA_SIMULATION")
+endif()
 
 # Compatibility alias so workstation invocations using -DFPGA_DEVICE=... are
 # consumed by this project instead of being reported as unused by CMake.
 if(DEFINED FPGA_DEVICE AND NOT FPGA_DEVICE STREQUAL "")
-    set(SYCL_CKKS_FPGA_DEVICE "${FPGA_DEVICE}" CACHE STRING "FPGA target device for hardware/report builds" FORCE)
+    set(SYCL_CKKS_FPGA_DEVICE "${FPGA_DEVICE}" CACHE STRING "FPGA target device for hardware/report/simulation builds" FORCE)
+endif()
+
+set(SYCL_CKKS_FPGA_BACKEND_FLAGS)
+set(SYCL_CKKS_DEVICE_COMPILE_DEFINITION FPGA_EMULATOR=1)
+set(SYCL_CKKS_DEVICE_DEFINE_FLAG -DFPGA_EMULATOR)
+set(SYCL_CKKS_MERGED_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator_merged.a)
+set(SYCL_CKKS_MRI_SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/merge_sycl_ckks_accelerator.mri)
+
+if(SYCL_CKKS_FPGA_HARDWARE)
+    message(STATUS "SYCL_CKKS hardware mode enabled; FPGA target: ${SYCL_CKKS_FPGA_DEVICE}")
+    set(SYCL_CKKS_DEVICE_COMPILE_DEFINITION FPGA_HARDWARE=1)
+    set(SYCL_CKKS_DEVICE_DEFINE_FLAG -DFPGA_HARDWARE)
+    list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS
+        -Xshardware
+        -Xstarget=${SYCL_CKKS_FPGA_DEVICE}
+    )
+elseif(SYCL_CKKS_FPGA_SIMULATION)
+    message(STATUS "SYCL_CKKS simulation mode enabled; FPGA target: ${SYCL_CKKS_FPGA_DEVICE}")
+    set(SYCL_CKKS_DEVICE_COMPILE_DEFINITION FPGA_SIMULATOR=1)
+    set(SYCL_CKKS_DEVICE_DEFINE_FLAG -DFPGA_SIMULATOR)
+    set(SYCL_CKKS_MERGED_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/sycl_ckks_accelerator_sim.a)
+    list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS
+        -Xssimulation
+        -Xstarget=${SYCL_CKKS_FPGA_DEVICE}
+    )
+    if(SYCL_CKKS_SIMULATION_WAVEFORMS)
+        if(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH STREQUAL "")
+            list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS -Xsghdl)
+        else()
+            list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS -Xsghdl=${SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH})
+        endif()
+    endif()
+else()
+    message(STATUS "SYCL_CKKS emulator mode enabled")
 endif()
 
 add_library(sycl_ckks_accelerator_obj OBJECT
@@ -46,37 +87,67 @@ target_compile_options(sycl_ckks_accelerator_obj PRIVATE
     -Wno-return-type-c-linkage
     -qactypes
 )
-
-if(SYCL_CKKS_FPGA_HARDWARE)
-    message(STATUS "SYCL_CKKS hardware mode enabled; FPGA target: ${SYCL_CKKS_FPGA_DEVICE}")
-    target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE FPGA_HARDWARE=1)
-else()
-    message(STATUS "SYCL_CKKS emulator mode enabled")
-    target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE FPGA_EMULATOR=1)
-endif()
+target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE ${SYCL_CKKS_DEVICE_COMPILE_DEFINITION})
 
 set(SYCL_CKKS_NTT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a)
 set(SYCL_CKKS_IFFT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lanes_double_253.a)
-set(SYCL_CKKS_MERGED_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator_merged.a)
-set(SYCL_CKKS_MRI_SCRIPT ${CMAKE_CURRENT_BINARY_DIR}/merge_sycl_ckks_accelerator.mri)
 
-file(WRITE ${SYCL_CKKS_MRI_SCRIPT}
-    "CREATE ${SYCL_CKKS_MERGED_ARCHIVE}\n"
-    "ADDLIB ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator.a\n"
-    "ADDLIB ${SYCL_CKKS_NTT_RTL_ARCHIVE}\n"
-    "ADDLIB ${SYCL_CKKS_IFFT_RTL_ARCHIVE}\n"
-    "SAVE\n"
-    "END\n")
+if(SYCL_CKKS_FPGA_SIMULATION)
+    # Simulator image archive. This uses -fsycl-link=image because the
+    # accelerator has no main(), while downstream SEAL-Embedded needs a
+    # reusable FPGA simulator image/archive. Runtime execution must enable the
+    # simulator device with CL_CONTEXT_MPSIM_DEVICE_INTELFPGA=1 or
+    # INTELFPGA_SIM_DEVICE_SPEC_DIR=<project.prj>.
+    add_custom_command(
+        OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND ${CMAKE_CXX_COMPILER}
+                -v
+                -fsycl
+                -std=c++17
+                -Rno-debug-disables-optimization
+                -DCSL_USE_GMP
+                -DCSL_SYCL
+                -Wno-return-type-c-linkage
+                -qactypes
+                -fintelfpga
+                ${SYCL_CKKS_FPGA_BACKEND_FLAGS}
+                ${SYCL_CKKS_DEVICE_DEFINE_FLAG}
+                -fsycl-link=image
+                -I${CMAKE_CURRENT_SOURCE_DIR}
+                -I${CMAKE_CURRENT_SOURCE_DIR}/include
+                -I${CMAKE_CURRENT_SOURCE_DIR}/include_internal
+                -I${CMAKE_CURRENT_SOURCE_DIR}/rtl
+                -o ${SYCL_CKKS_MERGED_ARCHIVE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/SYCL_ckks_sym.cpp
+                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/SYCL_ckks_sym.cpp
+                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        COMMENT "Running Intel FPGA simulation image compile for reusable archive ${SYCL_CKKS_MERGED_ARCHIVE}"
+        VERBATIM
+    )
+else()
+    file(WRITE ${SYCL_CKKS_MRI_SCRIPT}
+        "CREATE ${SYCL_CKKS_MERGED_ARCHIVE}\n"
+        "ADDLIB ${CMAKE_CURRENT_BINARY_DIR}/libsycl_ckks_accelerator.a\n"
+        "ADDLIB ${SYCL_CKKS_NTT_RTL_ARCHIVE}\n"
+        "ADDLIB ${SYCL_CKKS_IFFT_RTL_ARCHIVE}\n"
+        "SAVE\n"
+        "END\n")
 
-add_custom_command(
-    OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
-    COMMAND /bin/sh -c "${CMAKE_AR} -M < ${SYCL_CKKS_MRI_SCRIPT}"
-    COMMAND ${CMAKE_RANLIB} ${SYCL_CKKS_MERGED_ARCHIVE}
-    DEPENDS sycl_ckks_accelerator ${SYCL_CKKS_NTT_RTL_ARCHIVE} ${SYCL_CKKS_IFFT_RTL_ARCHIVE} ${SYCL_CKKS_MRI_SCRIPT}
-    COMMENT "Merging SYCL accelerator and active RTL archives into opaque static library"
-    VERBATIM
-)
+    add_custom_command(
+        OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMAND /bin/sh -c "${CMAKE_AR} -M < ${SYCL_CKKS_MRI_SCRIPT}"
+        COMMAND ${CMAKE_RANLIB} ${SYCL_CKKS_MERGED_ARCHIVE}
+        DEPENDS sycl_ckks_accelerator ${SYCL_CKKS_NTT_RTL_ARCHIVE} ${SYCL_CKKS_IFFT_RTL_ARCHIVE} ${SYCL_CKKS_MRI_SCRIPT}
+        COMMENT "Merging SYCL accelerator and active RTL archives into opaque static library"
+        VERBATIM
+    )
+endif()
 
 add_custom_target(sycl_ckks_accelerator_merged ALL
     DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
@@ -98,9 +169,14 @@ if(SYCL_CKKS_FPGA_HARDWARE)
         COMMENT "Running Intel FPGA early device link for board ${SYCL_CKKS_FPGA_DEVICE}"
         VERBATIM
     )
+elseif(SYCL_CKKS_FPGA_SIMULATION)
+    add_custom_target(sycl_ckks_accelerator_sim_archive
+        DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
+        COMMENT "Simulation accelerator archive ready for SEAL-Embedded: ${SYCL_CKKS_MERGED_ARCHIVE}"
+    )
 endif()
 
-# Downstream executables must still use the Intel SYCL/FPGA emulator link path
+# Downstream executables must still use the Intel SYCL/FPGA link path
 # so icpx performs the final device-image link from this opaque static archive.
 target_link_options(sycl_ckks_accelerator INTERFACE
     -fsycl
@@ -111,10 +187,20 @@ target_link_options(sycl_ckks_accelerator INTERFACE
     -Wno-return-type-c-linkage
     -qactypes
     -fintelfpga
-    -DFPGA_EMULATOR
-    -O0
     LINKER:--allow-multiple-definition
 )
+
+if(SYCL_CKKS_FPGA_HARDWARE OR SYCL_CKKS_FPGA_SIMULATION)
+    target_link_options(sycl_ckks_accelerator INTERFACE
+        ${SYCL_CKKS_FPGA_BACKEND_FLAGS}
+        ${SYCL_CKKS_DEVICE_DEFINE_FLAG}
+    )
+else()
+    target_link_options(sycl_ckks_accelerator INTERFACE
+        -DFPGA_EMULATOR
+        -O0
+    )
+endif()
 
 install(FILES ${SYCL_CKKS_MERGED_ARCHIVE}
     DESTINATION lib

@@ -236,7 +236,9 @@ extern "C" void SYCL_encrypt(
         buffer<PerModulusOutputBlock, 1>(output_blocks[2].data(), range(num_blocks))
     };
 
-#if FPGA_HARDWARE
+#if FPGA_SIMULATOR
+    auto selector = ext::intel::fpga_simulator_selector_v;
+#elif FPGA_HARDWARE
     auto selector = ext::intel::fpga_selector_v;
 #else
     auto selector = ext::intel::fpga_emulator_selector_v;

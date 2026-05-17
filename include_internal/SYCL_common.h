@@ -11,10 +11,12 @@ constexpr size_t LANES = 4;
 constexpr size_t NUM_BLOCKS = POLY_N / LANES;
 constexpr size_t PIPE_DEPTH_BUFFERED = NUM_BLOCKS;   // Pipes that must buffer a full polynomial
                                                       // (producer far ahead of consumer due to IFFT batch latency)
-constexpr size_t PIPE_DEPTH_STREAMING = 64;           // Pipes where producer/consumer run at II=1 in lock-step
+//constexpr size_t PIPE_DEPTH_STREAMING = 64;           // Pipes where producer/consumer run at II=1 in lock-step
                                                       // (compiler may increase beyond this for stall-freedom)
+
 constexpr int MAX_PIPELINES = 3;
 constexpr size_t NUM_MODULI = 3;
+constexpr size_t PIPE_DEPTH_STREAMING = NUM_BLOCKS;
 
 // ============================================================================
 // Barrett const_ratio lookup table for known moduli
@@ -210,7 +212,7 @@ inline void lane_transform(const InStruct& in, OutStruct& out, Func&& func)
 }
 
 template <typename InStruct1, typename InStruct2, typename OutStruct, typename Func>
-inline void lane_transform2(const InStruct1& in1, const InStruct2& in2, 
+inline void lane_transform2(const InStruct1& in1, const InStruct2& in2,
                             OutStruct& out, Func&& func)
 {
     out.element0 = func(in1.element0, in2.element0);

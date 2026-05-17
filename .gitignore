@@ -1,7 +1,11 @@
 # Build/install artifacts
 build/
-install/
+build-emu/
+build-sim/
+build-hw/
 build-report-*/
+build-kernel-tests-*/
+install/
 logs/
 
 # CMake generated files

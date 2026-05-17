@@ -23,17 +23,71 @@ Always initialize the Intel oneAPI environment first:
 source /opt/intel/oneapi/2025.0/oneapi-vars.sh --force
 ```
 
-Configure and build:
+This project has three distinct target paths:
+
+- emulator: fast CPU-backed FPGA emulator build for functional debugging
+- simulation: RTL simulator-backed build using `-Xssimulation`
+- hardware/report: FPGA hardware report/early-link flow using `-Xshardware`
+
+### Emulator archive
 
 ```bash
-cmake -S . -B build -DCMAKE_CXX_COMPILER=icpx
-cmake --build build -j
+cmake -S . -B build-emu -DCMAKE_CXX_COMPILER=icpx
+cmake --build build-emu -j
+```
+
+### Simulator archive
+
+The simulator path uses `FPGA_SIMULATOR`, `sycl::ext::intel::fpga_simulator_selector_v`, and `-Xssimulation`. Use this when emulator behavior differs from expected hardware behavior or when you need cycle/bit-accurate simulator visibility without doing a full hardware compile.
+
+```bash
+cmake -S . -B build-sim \
+  -DCMAKE_CXX_COMPILER=icpx \
+  -DSYCL_CKKS_FPGA_SIMULATION=ON \
+  -DSYCL_CKKS_FPGA_DEVICE=<family_or_part_or_board_target>
+cmake --build build-sim --target sycl_ckks_accelerator_sim_archive -j
+```
+
+To enable waveform capture, add:
+
+```bash
+-DSYCL_CKKS_SIMULATION_WAVEFORMS=ON
+```
+
+Optionally set a hierarchy depth:
+
+```bash
+-DSYCL_CKKS_SIMULATION_WAVEFORM_DEPTH=0
+```
+
+`0` requests all hierarchy with `-Xsghdl=0`; leaving the depth empty uses Intel's default `-Xsghdl` depth.
+
+To run a downstream executable against the simulator device, the Intel guide requires enabling the simulation runtime device search, for example:
+
+```bash
+export CL_CONTEXT_MPSIM_DEVICE_INTELFPGA=1
+# or, if automatic discovery fails:
+export INTELFPGA_SIM_DEVICE_SPEC_DIR=/path/to/<project>.prj
+# sometimes also needed:
+export CL_CONTEXT_COMPILER_MODE_INTELFPGA=3
+```
+
+Unset those variables before returning to physical FPGA runs.
+
+### Hardware report
+
+```bash
+cmake -S . -B build-hw \
+  -DCMAKE_CXX_COMPILER=icpx \
+  -DSYCL_CKKS_FPGA_HARDWARE=ON \
+  -DSYCL_CKKS_FPGA_DEVICE=<family_or_part_or_board_target>
+cmake --build build-hw --target sycl_ckks_accelerator_report -j
 ```
 
 Install to a local prefix consumed by the thin SEAL-Embedded patch:
 
 ```bash
-cmake --install build --prefix /home/joe/Projects/Thesis/new/SYCL_Pipeline/install
+cmake --install build-emu --prefix /home/joe/Projects/Thesis/new/SYCL_Pipeline/install
 ```
 
 Expected installed artifacts:
