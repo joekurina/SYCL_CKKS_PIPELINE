@@ -29,42 +29,88 @@ public:
             size_t input_count = 0;
             size_t output_count = 0;
 
+            // hls-samples/Tutorials/DesignPatterns/restartable_streaming_kernel
+            // and include/pipe_utils.hpp show the useful liveness pattern here:
+            // keep explicit state, use non-blocking writes on multi-interface
+            // fanout, and advance the frame counter only after every destination
+            // has accepted the pending beat. Do not keep advancing the RTL while
+            // a previous output beat is still pending, or a later valid output
+            // could be dropped.
+            bool have_pending_output = false;
+            bool need_scale_reduce_0 = false;
+            bool need_scale_reduce_1 = false;
+            bool need_scale_reduce_2 = false;
+            encoding_block pending_output{};
+
             while (output_count < NUM_BLOCKS) {
                 bool input_valid = false;
                 encoding_block block{};
 
-                if (input_count < NUM_BLOCKS) {
-                    block = SharedToIFFTPipe::read();
-                    input_valid = true;
-                    input_count++;
-                }
+                if (!have_pending_output) {
+                    if (input_count < NUM_BLOCKS) {
+                        block = SharedToIFFTPipe::read();
+                        input_valid = true;
+                        input_count++;
+                    }
 
-                fhe_ifft_4k_4lanes_double_253_input_t hw_in;
-                hw_in.port_v_in_s = input_valid;
-                hw_in.port_data_in_0re = block.element0.real();
-                hw_in.port_data_in_0im = block.element0.imag();
-                hw_in.port_data_in_1re = block.element1.real();
-                hw_in.port_data_in_1im = block.element1.imag();
-                hw_in.port_data_in_2re = block.element2.real();
-                hw_in.port_data_in_2im = block.element2.imag();
-                hw_in.port_data_in_3re = block.element3.real();
-                hw_in.port_data_in_3im = block.element3.imag();
+                    fhe_ifft_4k_4lanes_double_253_input_t hw_in;
+                    hw_in.port_v_in_s = input_valid;
+                    hw_in.port_data_in_0re = block.element0.real();
+                    hw_in.port_data_in_0im = block.element0.imag();
+                    hw_in.port_data_in_1re = block.element1.real();
+                    hw_in.port_data_in_1im = block.element1.imag();
+                    hw_in.port_data_in_2re = block.element2.real();
+                    hw_in.port_data_in_2im = block.element2.imag();
+                    hw_in.port_data_in_3re = block.element3.real();
+                    hw_in.port_data_in_3im = block.element3.imag();
 
 #ifdef FPGA_EMULATOR
-                fhe_ifft_4k_4lanes_double_253_output_t hw_out = fhe_ifft_4k_4lanes_double_253(rtl_instance, hw_in);
+                    fhe_ifft_4k_4lanes_double_253_output_t hw_out = fhe_ifft_4k_4lanes_double_253(rtl_instance, hw_in);
 #else
-                fhe_ifft_4k_4lanes_double_253_output_t hw_out = fhe_ifft_4k_4lanes_double_253(hw_in);
+                    fhe_ifft_4k_4lanes_double_253_output_t hw_out = fhe_ifft_4k_4lanes_double_253(hw_in);
 #endif
 
-                if (hw_out.port_v_out_s == 1) {
-                    encoding_block out;
-                    out.element0 = complex_double(hw_out.port_data_out_0re, hw_out.port_data_out_0im);
-                    out.element1 = complex_double(hw_out.port_data_out_1re, hw_out.port_data_out_1im);
-                    out.element2 = complex_double(hw_out.port_data_out_2re, hw_out.port_data_out_2im);
-                    out.element3 = complex_double(hw_out.port_data_out_3re, hw_out.port_data_out_3im);
+                    if (hw_out.port_v_out_s == 1) {
+                        pending_output.element0 = complex_double(hw_out.port_data_out_0re, hw_out.port_data_out_0im);
+                        pending_output.element1 = complex_double(hw_out.port_data_out_1re, hw_out.port_data_out_1im);
+                        pending_output.element2 = complex_double(hw_out.port_data_out_2re, hw_out.port_data_out_2im);
+                        pending_output.element3 = complex_double(hw_out.port_data_out_3re, hw_out.port_data_out_3im);
+                        have_pending_output = true;
+                        need_scale_reduce_0 = true;
+                        need_scale_reduce_1 = true;
+                        need_scale_reduce_2 = true;
+                    }
+                }
 
-                    IFFTToScaleReducePipes::write(out);
-                    output_count++;
+                if (have_pending_output) {
+                    if (need_scale_reduce_0) {
+                        bool wrote_0 = false;
+                        IFFTToScaleReducePipes::PipeAt<0>::write(pending_output, wrote_0);
+                        if (wrote_0) {
+                            need_scale_reduce_0 = false;
+                        }
+                    }
+
+                    if (need_scale_reduce_1) {
+                        bool wrote_1 = false;
+                        IFFTToScaleReducePipes::PipeAt<1>::write(pending_output, wrote_1);
+                        if (wrote_1) {
+                            need_scale_reduce_1 = false;
+                        }
+                    }
+
+                    if (need_scale_reduce_2) {
+                        bool wrote_2 = false;
+                        IFFTToScaleReducePipes::PipeAt<2>::write(pending_output, wrote_2);
+                        if (wrote_2) {
+                            need_scale_reduce_2 = false;
+                        }
+                    }
+
+                    if (!need_scale_reduce_0 && !need_scale_reduce_1 && !need_scale_reduce_2) {
+                        have_pending_output = false;
+                        output_count++;
+                    }
                 }
             }
 

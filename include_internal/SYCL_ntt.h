@@ -61,47 +61,83 @@ public:
             reg_test_verifyNTT_multi_DUT* rtl_instance = the_nwc_4k_ntt_new_instance();
 #endif
 
+            // hls-samples/Tutorials/DesignPatterns/restartable_streaming_kernel
+            // uses non-blocking pipe operations plus explicit state advancement so
+            // one stalled interface cannot prevent the kernel from servicing other
+            // interfaces. Apply the same pattern around the frame-oriented RTL NTT:
+            // feed exactly one contiguous input frame, then hold each RTL output as
+            // pending until every required destination accepts it.
+            size_t input_count = 0;
             size_t output_count = 0;
+            bool have_pending_output = false;
+            bool need_downstream_write = false;
+            bool need_exit_write = false;
+            u32x4 pending_output{};
 
             [[intel::initiation_interval(1)]]
-            while (true) {
+            while (output_count < NUM_BLOCKS) {
                 bool input_valid = false;
-                u32x4 input_block = Traits::InputPipe::read(input_valid);
+                u32x4 input_block{};
 
-                RTLInput rtl_in;
-                rtl_in.x0 = static_cast<int32_t>(input_block.element0);
-                rtl_in.x1 = static_cast<int32_t>(input_block.element1);
-                rtl_in.x2 = static_cast<int32_t>(input_block.element2);
-                rtl_in.x3 = static_cast<int32_t>(input_block.element3);
+                if (!have_pending_output && input_count < NUM_BLOCKS) {
+                    input_block = Traits::InputPipe::read();
+                    input_valid = true;
+                    input_count++;
+                }
 
-                the_nwc_4k_ntt_input_t hw_in;
-                hw_in.port_in_v_s = input_valid;
-                hw_in.port_in_c_s = kernel_mod_sel;
-                hw_in.port_x_in_0 = rtl_in.x0;
-                hw_in.port_x_in_1 = rtl_in.x1;
-                hw_in.port_x_in_2 = rtl_in.x2;
-                hw_in.port_x_in_3 = rtl_in.x3;
+                if (!have_pending_output) {
+                    RTLInput rtl_in;
+                    rtl_in.x0 = static_cast<int32_t>(input_block.element0);
+                    rtl_in.x1 = static_cast<int32_t>(input_block.element1);
+                    rtl_in.x2 = static_cast<int32_t>(input_block.element2);
+                    rtl_in.x3 = static_cast<int32_t>(input_block.element3);
+
+                    the_nwc_4k_ntt_input_t hw_in;
+                    hw_in.port_in_v_s = input_valid;
+                    hw_in.port_in_c_s = kernel_mod_sel;
+                    hw_in.port_x_in_0 = rtl_in.x0;
+                    hw_in.port_x_in_1 = rtl_in.x1;
+                    hw_in.port_x_in_2 = rtl_in.x2;
+                    hw_in.port_x_in_3 = rtl_in.x3;
 
 #ifdef FPGA_EMULATOR
-                the_nwc_4k_ntt_output_t hw_out = the_nwc_4k_ntt(rtl_instance, hw_in);
+                    the_nwc_4k_ntt_output_t hw_out = the_nwc_4k_ntt(rtl_instance, hw_in);
 #else
-                the_nwc_4k_ntt_output_t hw_out = the_nwc_4k_ntt(hw_in);
+                    the_nwc_4k_ntt_output_t hw_out = the_nwc_4k_ntt(hw_in);
 #endif
 
-                if (hw_out.port_out_v_s == 1) {
-                    u32x4 output_block;
-                    output_block.element0 = static_cast<uint32_t>(hw_out.port_out_q_0);
-                    output_block.element1 = static_cast<uint32_t>(hw_out.port_out_q_1);
-                    output_block.element2 = static_cast<uint32_t>(hw_out.port_out_q_2);
-                    output_block.element3 = static_cast<uint32_t>(hw_out.port_out_q_3);
+                    if (hw_out.port_out_v_s == 1) {
+                        pending_output.element0 = static_cast<uint32_t>(hw_out.port_out_q_0);
+                        pending_output.element1 = static_cast<uint32_t>(hw_out.port_out_q_1);
+                        pending_output.element2 = static_cast<uint32_t>(hw_out.port_out_q_2);
+                        pending_output.element3 = static_cast<uint32_t>(hw_out.port_out_q_3);
+                        have_pending_output = true;
+                        need_downstream_write = true;
+                        need_exit_write = kernel_write_exit;
+                    }
+                }
 
-                    Traits::DownstreamPipe::write(output_block);
-
-                    if (kernel_write_exit) {
-                        Traits::ExitPipe::write(output_block);
+                if (have_pending_output) {
+                    if (need_downstream_write) {
+                        bool wrote_downstream = false;
+                        Traits::DownstreamPipe::write(pending_output, wrote_downstream);
+                        if (wrote_downstream) {
+                            need_downstream_write = false;
+                        }
                     }
 
-                    if (++output_count >= NUM_BLOCKS) break;
+                    if (need_exit_write) {
+                        bool wrote_exit = false;
+                        Traits::ExitPipe::write(pending_output, wrote_exit);
+                        if (wrote_exit) {
+                            need_exit_write = false;
+                        }
+                    }
+
+                    if (!need_downstream_write && !need_exit_write) {
+                        have_pending_output = false;
+                        output_count++;
+                    }
                 }
             }
 
