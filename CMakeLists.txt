@@ -3,6 +3,7 @@ project(sycl_ckks_accelerator VERSION 0.1.0 LANGUAGES CXX)
 
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
 option(SYCL_CKKS_FPGA_SIMULATION "Build for FPGA simulator instead of emulator/hardware" OFF)
+option(SYCL_CKKS_BUILD_KERNEL_HARNESSES "Build individual FPGA Test harness executables for internal SYCL kernels" OFF)
 option(SYCL_CKKS_SIMULATION_WAVEFORMS "Enable simulator waveform capture with -Xsghdl" OFF)
 set(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH "" CACHE STRING "Optional hierarchy depth for simulator waveform capture. Empty uses -Xsghdl default depth 1; 0 logs all hierarchy.")
 set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report/simulation builds")
@@ -173,6 +174,79 @@ elseif(SYCL_CKKS_FPGA_SIMULATION)
     add_custom_target(sycl_ckks_accelerator_sim_archive
         DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
         COMMENT "Simulation accelerator archive ready for SEAL-Embedded: ${SYCL_CKKS_MERGED_ARCHIVE}"
+    )
+endif()
+
+if(SYCL_CKKS_BUILD_KERNEL_HARNESSES)
+    if(NOT SYCL_CKKS_FPGA_SIMULATION)
+        message(FATAL_ERROR "SYCL_CKKS_BUILD_KERNEL_HARNESSES requires SYCL_CKKS_FPGA_SIMULATION=ON so harnesses use the simulator path")
+    endif()
+
+    function(add_sycl_ckks_kernel_harness target source)
+        add_executable(${target} ${source})
+        target_compile_features(${target} PRIVATE cxx_std_17)
+        target_include_directories(${target}
+            PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}
+                ${CMAKE_CURRENT_SOURCE_DIR}/include
+                ${CMAKE_CURRENT_SOURCE_DIR}/include_internal
+                ${CMAKE_CURRENT_SOURCE_DIR}/rtl
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/kernel_harnesses
+        )
+        target_compile_options(${target}
+            PRIVATE
+                -fsycl
+                -fintelfpga
+                -Rno-debug-disables-optimization
+                -DCSL_USE_GMP
+                -DCSL_SYCL
+                -Wno-return-type-c-linkage
+                -qactypes
+                ${SYCL_CKKS_FPGA_BACKEND_FLAGS}
+        )
+        target_compile_definitions(${target} PRIVATE ${SYCL_CKKS_DEVICE_COMPILE_DEFINITION})
+        target_link_options(${target}
+            PRIVATE
+                -fsycl
+                -std=c++17
+                -Rno-debug-disables-optimization
+                -DCSL_USE_GMP
+                -DCSL_SYCL
+                -Wno-return-type-c-linkage
+                -qactypes
+                -fintelfpga
+                ${SYCL_CKKS_FPGA_BACKEND_FLAGS}
+                ${SYCL_CKKS_DEVICE_DEFINE_FLAG}
+                LINKER:--allow-multiple-definition
+        )
+        target_link_libraries(${target}
+            PRIVATE
+                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
+        )
+    endfunction()
+
+    add_sycl_ckks_kernel_harness(sycl_ckks_entry_kernel_fpga_test tests/kernel_harnesses/entry_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ifft_kernel_fpga_test tests/kernel_harnesses/ifft_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_scale_and_reduce_kernel_fpga_test tests/kernel_harnesses/scale_and_reduce_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_a_kernel_fpga_test tests/kernel_harnesses/ntt_a_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_b_kernel_fpga_test tests/kernel_harnesses/ntt_b_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_poly_mult_neg_add_kernel_fpga_test tests/kernel_harnesses/poly_mult_neg_add_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_exit_c0_kernel_fpga_test tests/kernel_harnesses/exit_c0_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_exit_ntt_a_kernel_fpga_test tests/kernel_harnesses/exit_ntt_a_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_exit_ntt_b_kernel_fpga_test tests/kernel_harnesses/exit_ntt_b_kernel_fpga_test.cpp)
+
+    add_custom_target(sycl_ckks_kernel_harnesses
+        DEPENDS
+            sycl_ckks_entry_kernel_fpga_test
+            sycl_ckks_ifft_kernel_fpga_test
+            sycl_ckks_scale_and_reduce_kernel_fpga_test
+            sycl_ckks_ntt_a_kernel_fpga_test
+            sycl_ckks_ntt_b_kernel_fpga_test
+            sycl_ckks_poly_mult_neg_add_kernel_fpga_test
+            sycl_ckks_exit_c0_kernel_fpga_test
+            sycl_ckks_exit_ntt_a_kernel_fpga_test
+            sycl_ckks_exit_ntt_b_kernel_fpga_test
     )
 endif()
 
