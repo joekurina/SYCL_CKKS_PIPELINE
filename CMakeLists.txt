@@ -202,7 +202,6 @@ if(SYCL_CKKS_BUILD_KERNEL_HARNESSES)
                 -DCSL_SYCL
                 -Wno-return-type-c-linkage
                 -qactypes
-                ${SYCL_CKKS_FPGA_BACKEND_FLAGS}
         )
         target_compile_definitions(${target} PRIVATE ${SYCL_CKKS_DEVICE_COMPILE_DEFINITION})
         target_link_options(${target}
@@ -219,18 +218,16 @@ if(SYCL_CKKS_BUILD_KERNEL_HARNESSES)
                 ${SYCL_CKKS_DEVICE_DEFINE_FLAG}
                 LINKER:--allow-multiple-definition
         )
-        target_link_libraries(${target}
-            PRIVATE
-                ${SYCL_CKKS_NTT_RTL_ARCHIVE}
-                ${SYCL_CKKS_IFFT_RTL_ARCHIVE}
-        )
+        foreach(rtl_archive IN LISTS ARGN)
+            target_link_libraries(${target} PRIVATE ${rtl_archive})
+        endforeach()
     endfunction()
 
     add_sycl_ckks_kernel_harness(sycl_ckks_entry_kernel_fpga_test tests/kernel_harnesses/entry_kernel_fpga_test.cpp)
-    add_sycl_ckks_kernel_harness(sycl_ckks_ifft_kernel_fpga_test tests/kernel_harnesses/ifft_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ifft_kernel_fpga_test tests/kernel_harnesses/ifft_kernel_fpga_test.cpp ${SYCL_CKKS_IFFT_RTL_ARCHIVE})
     add_sycl_ckks_kernel_harness(sycl_ckks_scale_and_reduce_kernel_fpga_test tests/kernel_harnesses/scale_and_reduce_kernel_fpga_test.cpp)
-    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_a_kernel_fpga_test tests/kernel_harnesses/ntt_a_kernel_fpga_test.cpp)
-    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_b_kernel_fpga_test tests/kernel_harnesses/ntt_b_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_a_kernel_fpga_test tests/kernel_harnesses/ntt_a_kernel_fpga_test.cpp ${SYCL_CKKS_NTT_RTL_ARCHIVE})
+    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_b_kernel_fpga_test tests/kernel_harnesses/ntt_b_kernel_fpga_test.cpp ${SYCL_CKKS_NTT_RTL_ARCHIVE})
     add_sycl_ckks_kernel_harness(sycl_ckks_poly_mult_neg_add_kernel_fpga_test tests/kernel_harnesses/poly_mult_neg_add_kernel_fpga_test.cpp)
     add_sycl_ckks_kernel_harness(sycl_ckks_exit_c0_kernel_fpga_test tests/kernel_harnesses/exit_c0_kernel_fpga_test.cpp)
     add_sycl_ckks_kernel_harness(sycl_ckks_exit_ntt_a_kernel_fpga_test tests/kernel_harnesses/exit_ntt_a_kernel_fpga_test.cpp)

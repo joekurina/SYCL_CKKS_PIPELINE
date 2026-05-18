@@ -51,28 +51,36 @@ public:
 
 int main()
 {
+    sycl_ckks::harness::host_debug("ntt-a: preparing host buffers");
     constexpr int P = 0;
     const uint8_t modulus_selector = get_modulus_selector(sycl_ckks::harness::default_modulus(P));
     std::vector<u32x4> output(NUM_BLOCKS);
     sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
+    sycl_ckks::harness::host_debug("ntt-a: creating SYCL queue");
     auto q = sycl_ckks::harness::make_queue();
+    sycl_ckks::harness::host_debug("ntt-a: submitting drain kernel");
     auto drain_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::DrainNTTAKernel<P> kernel(output_buf);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("ntt-a: submitting NTT-A kernel");
     auto ntt_event = q.submit([&](sycl::handler& h) {
         NTTKernelA<P> kernel(modulus_selector, false);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("ntt-a: submitting feeder kernel");
     auto feed_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::FeedNTTAKernel<P> kernel;
         kernel(h);
     });
 
-    feed_event.wait();
-    ntt_event.wait();
-    drain_event.wait();
+    (void)drain_event;
+    (void)ntt_event;
+    (void)feed_event;
+    sycl_ckks::harness::host_debug("ntt-a: waiting for submitted kernels");
+    q.wait_and_throw();
+    sycl_ckks::harness::host_debug("ntt-a: PASS");
 
     return 0;
 }

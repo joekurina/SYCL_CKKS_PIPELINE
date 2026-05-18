@@ -53,6 +53,7 @@ public:
 
 int main()
 {
+    sycl_ckks::harness::host_debug("ifft: preparing host buffers");
     std::array<std::vector<encoding_block>, NUM_MODULI> output;
     for (auto& per_modulus : output) {
         per_modulus.resize(NUM_BLOCKS);
@@ -64,27 +65,35 @@ int main()
         sycl::buffer<encoding_block, 1>(output[2].data(), sycl::range<1>(NUM_BLOCKS)),
     };
 
+    sycl_ckks::harness::host_debug("ifft: creating SYCL queue");
     auto q = sycl_ckks::harness::make_queue();
+    sycl_ckks::harness::host_debug("ifft: submitting drain kernel");
     auto drain_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::DrainIFFTKernel kernel(output_bufs);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("ifft: submitting IFFT kernel");
     auto ifft_event = q.submit([&](sycl::handler& h) {
         IFFTKernel kernel;
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("ifft: submitting feeder kernel");
     auto feed_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::FeedIFFTKernel kernel;
         kernel(h);
     });
 
-    feed_event.wait();
-    ifft_event.wait();
-    drain_event.wait();
+    (void)drain_event;
+    (void)ifft_event;
+    (void)feed_event;
+    sycl_ckks::harness::host_debug("ifft: waiting for submitted kernels");
+    q.wait_and_throw();
+    sycl_ckks::harness::host_debug("ifft: kernels completed; verifying outputs");
 
     for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
         sycl_ckks::harness::require(sycl_ckks::harness::equal_encoding(output[0][blk], output[1][blk]), "IFFTKernel fanout 0/1 mismatch");
         sycl_ckks::harness::require(sycl_ckks::harness::equal_encoding(output[1][blk], output[2][blk]), "IFFTKernel fanout 1/2 mismatch");
     }
+    sycl_ckks::harness::host_debug("ifft: PASS");
     return 0;
 }

@@ -71,6 +71,7 @@ inline uint32_t expected_scale_reduce_lane(size_t block, size_t lane, double sca
 
 int main()
 {
+    sycl_ckks::harness::host_debug("scale-reduce: preparing host buffers");
     constexpr int P = 0;
     constexpr double scale = 1048576.0;
     const uint32_t mod = sycl_ckks::harness::default_modulus(P);
@@ -80,23 +81,30 @@ int main()
     std::vector<u32x4> output(NUM_BLOCKS);
     sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
+    sycl_ckks::harness::host_debug("scale-reduce: creating SYCL queue");
     auto q = sycl_ckks::harness::make_queue();
+    sycl_ckks::harness::host_debug("scale-reduce: submitting drain kernel");
     auto drain_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::DrainScaleAndReduceKernel<P> kernel(output_buf);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("scale-reduce: submitting scale/reduce kernel");
     auto scale_event = q.submit([&](sycl::handler& h) {
         ScaleAndReduceKernel<P> kernel(scale, mod, ratio);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("scale-reduce: submitting feeder kernel");
     auto feed_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::FeedScaleAndReduceKernel<P> kernel;
         kernel(h);
     });
 
-    feed_event.wait();
-    scale_event.wait();
-    drain_event.wait();
+    (void)drain_event;
+    (void)scale_event;
+    (void)feed_event;
+    sycl_ckks::harness::host_debug("scale-reduce: waiting for submitted kernels");
+    q.wait_and_throw();
+    sycl_ckks::harness::host_debug("scale-reduce: kernels completed; verifying outputs");
 
     for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
         u32x4 expected;
@@ -106,5 +114,6 @@ int main()
         expected.element3 = sycl_ckks::harness::expected_scale_reduce_lane(blk, 3, scale, mod, ratio);
         sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(output[blk], expected), "ScaleAndReduceKernel output mismatch");
     }
+    sycl_ckks::harness::host_debug("scale-reduce: PASS");
     return 0;
 }

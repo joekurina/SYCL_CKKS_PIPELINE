@@ -10,7 +10,14 @@
 #include <cstdlib>
 #include <iostream>
 
+
 namespace sycl_ckks::harness {
+
+inline void host_debug(const char* message)
+{
+    std::cerr << "[FPGA Test harness host] " << message << '\n';
+    std::cerr.flush();
+}
 
 inline sycl::queue make_queue()
 {

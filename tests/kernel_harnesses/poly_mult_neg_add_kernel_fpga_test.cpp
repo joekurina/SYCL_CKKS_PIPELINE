@@ -62,6 +62,7 @@ inline uint32_t expected_poly_lane(size_t block, size_t lane, uint32_t mod, cons
 
 int main()
 {
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: preparing host buffers");
     constexpr int P = 0;
     const uint32_t mod = sycl_ckks::harness::default_modulus(P);
     uint32_t ratio[2];
@@ -70,23 +71,30 @@ int main()
     std::vector<u32x4> output(NUM_BLOCKS);
     sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: creating SYCL queue");
     auto q = sycl_ckks::harness::make_queue();
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting drain kernel");
     auto drain_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::DrainPolyMultNegAddKernel<P> kernel(output_buf);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting poly kernel");
     auto poly_event = q.submit([&](sycl::handler& h) {
         PolyMultNegAddKernel<P> kernel(mod, ratio);
         kernel(h);
     });
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting feeder kernel");
     auto feed_event = q.submit([&](sycl::handler& h) {
         sycl_ckks::harness::FeedPolyMultNegAddKernel<P> kernel;
         kernel(h);
     });
 
-    feed_event.wait();
-    poly_event.wait();
-    drain_event.wait();
+    (void)drain_event;
+    (void)poly_event;
+    (void)feed_event;
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: waiting for submitted kernels");
+    q.wait_and_throw();
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: kernels completed; verifying outputs");
 
     for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
         u32x4 expected;
@@ -96,5 +104,6 @@ int main()
         expected.element3 = sycl_ckks::harness::expected_poly_lane(blk, 3, mod, ratio);
         sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(output[blk], expected), "PolyMultNegAddKernel output mismatch");
     }
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: PASS");
     return 0;
 }
