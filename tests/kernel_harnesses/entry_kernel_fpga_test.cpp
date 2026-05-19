@@ -77,41 +77,44 @@ int main()
         c1_out[p].resize(NUM_BLOCKS);
     }
 
-    sycl::buffer<PipelineInputBlock, 1> input_buf(input.data(), sycl::range<1>(NUM_BLOCKS));
-    sycl::buffer<encoding_block, 1> encoding_buf(encoding_out.data(), sycl::range<1>(NUM_BLOCKS));
-    std::array<sycl::buffer<i8x4, 1>, NUM_MODULI> error_bufs = {
-        sycl::buffer<i8x4, 1>(error_out[0].data(), sycl::range<1>(NUM_BLOCKS)),
-        sycl::buffer<i8x4, 1>(error_out[1].data(), sycl::range<1>(NUM_BLOCKS)),
-        sycl::buffer<i8x4, 1>(error_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
-    };
-    std::array<sycl::buffer<u32x4, 1>, NUM_MODULI> secret_bufs = {
-        sycl::buffer<u32x4, 1>(secret_out[0].data(), sycl::range<1>(NUM_BLOCKS)),
-        sycl::buffer<u32x4, 1>(secret_out[1].data(), sycl::range<1>(NUM_BLOCKS)),
-        sycl::buffer<u32x4, 1>(secret_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
-    };
-    std::array<sycl::buffer<u32x4, 1>, NUM_MODULI> c1_bufs = {
-        sycl::buffer<u32x4, 1>(c1_out[0].data(), sycl::range<1>(NUM_BLOCKS)),
-        sycl::buffer<u32x4, 1>(c1_out[1].data(), sycl::range<1>(NUM_BLOCKS)),
-        sycl::buffer<u32x4, 1>(c1_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
-    };
+    {
+        sycl::buffer<PipelineInputBlock, 1> input_buf(input.data(), sycl::range<1>(NUM_BLOCKS));
+        sycl::buffer<encoding_block, 1> encoding_buf(encoding_out.data(), sycl::range<1>(NUM_BLOCKS));
+        std::array<sycl::buffer<i8x4, 1>, NUM_MODULI> error_bufs = {
+            sycl::buffer<i8x4, 1>(error_out[0].data(), sycl::range<1>(NUM_BLOCKS)),
+            sycl::buffer<i8x4, 1>(error_out[1].data(), sycl::range<1>(NUM_BLOCKS)),
+            sycl::buffer<i8x4, 1>(error_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
+        };
+        std::array<sycl::buffer<u32x4, 1>, NUM_MODULI> secret_bufs = {
+            sycl::buffer<u32x4, 1>(secret_out[0].data(), sycl::range<1>(NUM_BLOCKS)),
+            sycl::buffer<u32x4, 1>(secret_out[1].data(), sycl::range<1>(NUM_BLOCKS)),
+            sycl::buffer<u32x4, 1>(secret_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
+        };
+        std::array<sycl::buffer<u32x4, 1>, NUM_MODULI> c1_bufs = {
+            sycl::buffer<u32x4, 1>(c1_out[0].data(), sycl::range<1>(NUM_BLOCKS)),
+            sycl::buffer<u32x4, 1>(c1_out[1].data(), sycl::range<1>(NUM_BLOCKS)),
+            sycl::buffer<u32x4, 1>(c1_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
+        };
 
-    sycl_ckks::harness::host_debug("entry: creating SYCL queue");
-    auto q = sycl_ckks::harness::make_queue();
-    sycl_ckks::harness::host_debug("entry: submitting drain kernel");
-    auto drain_event = q.submit([&](sycl::handler& h) {
-        sycl_ckks::harness::DrainEntryKernel kernel(encoding_buf, error_bufs, secret_bufs, c1_bufs);
-        kernel(h);
-    });
-    sycl_ckks::harness::host_debug("entry: submitting entry kernel");
-    auto entry_event = q.submit([&](sycl::handler& h) {
-        EntryKernel kernel(input_buf);
-        kernel(h);
-    });
-    (void)drain_event;
-    (void)entry_event;
-    sycl_ckks::harness::host_debug("entry: waiting for submitted kernels");
-    q.wait_and_throw();
-    sycl_ckks::harness::host_debug("entry: kernels completed; verifying outputs");
+        sycl_ckks::harness::host_debug("entry: creating SYCL queue");
+        auto q = sycl_ckks::harness::make_queue();
+        sycl_ckks::harness::host_debug("entry: submitting drain kernel");
+        auto drain_event = q.submit([&](sycl::handler& h) {
+            sycl_ckks::harness::DrainEntryKernel kernel(encoding_buf, error_bufs, secret_bufs, c1_bufs);
+            kernel(h);
+        });
+        sycl_ckks::harness::host_debug("entry: submitting entry kernel");
+        auto entry_event = q.submit([&](sycl::handler& h) {
+            EntryKernel kernel(input_buf);
+            kernel(h);
+        });
+        (void)drain_event;
+        (void)entry_event;
+        sycl_ckks::harness::host_debug("entry: waiting for submitted kernels");
+        q.wait_and_throw();
+    }
+
+    sycl_ckks::harness::host_debug("entry: kernels completed; verifying host outputs");
 
     for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
         sycl_ckks::harness::require(sycl_ckks::harness::equal_encoding(encoding_out[blk], input[blk].encoding), "EntryKernel encoding fanout mismatch");
