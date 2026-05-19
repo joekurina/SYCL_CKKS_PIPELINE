@@ -69,32 +69,35 @@ int main()
     sycl_ckks::harness::default_const_ratio(P, ratio);
 
     std::vector<u32x4> output(NUM_BLOCKS);
-    sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
+    {
+        sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
-    sycl_ckks::harness::host_debug("poly-mult-neg-add: creating SYCL queue");
-    auto q = sycl_ckks::harness::make_queue();
-    sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting drain kernel");
-    auto drain_event = q.submit([&](sycl::handler& h) {
-        sycl_ckks::harness::DrainPolyMultNegAddKernel<P> kernel(output_buf);
-        kernel(h);
-    });
-    sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting poly kernel");
-    auto poly_event = q.submit([&](sycl::handler& h) {
-        PolyMultNegAddKernel<P> kernel(mod, ratio);
-        kernel(h);
-    });
-    sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting feeder kernel");
-    auto feed_event = q.submit([&](sycl::handler& h) {
-        sycl_ckks::harness::FeedPolyMultNegAddKernel<P> kernel;
-        kernel(h);
-    });
+        sycl_ckks::harness::host_debug("poly-mult-neg-add: creating SYCL queue");
+        auto q = sycl_ckks::harness::make_queue();
+        sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting drain kernel");
+        auto drain_event = q.submit([&](sycl::handler& h) {
+            sycl_ckks::harness::DrainPolyMultNegAddKernel<P> kernel(output_buf);
+            kernel(h);
+        });
+        sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting poly kernel");
+        auto poly_event = q.submit([&](sycl::handler& h) {
+            PolyMultNegAddKernel<P> kernel(mod, ratio);
+            kernel(h);
+        });
+        sycl_ckks::harness::host_debug("poly-mult-neg-add: submitting feeder kernel");
+        auto feed_event = q.submit([&](sycl::handler& h) {
+            sycl_ckks::harness::FeedPolyMultNegAddKernel<P> kernel;
+            kernel(h);
+        });
 
-    (void)drain_event;
-    (void)poly_event;
-    (void)feed_event;
-    sycl_ckks::harness::host_debug("poly-mult-neg-add: waiting for submitted kernels");
-    q.wait_and_throw();
-    sycl_ckks::harness::host_debug("poly-mult-neg-add: kernels completed; verifying outputs");
+        (void)drain_event;
+        (void)poly_event;
+        (void)feed_event;
+        sycl_ckks::harness::host_debug("poly-mult-neg-add: waiting for submitted kernels");
+        q.wait_and_throw();
+    }
+
+    sycl_ckks::harness::host_debug("poly-mult-neg-add: kernels completed; verifying host outputs");
 
     for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
         u32x4 expected;

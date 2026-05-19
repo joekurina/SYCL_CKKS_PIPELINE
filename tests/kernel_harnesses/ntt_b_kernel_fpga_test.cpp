@@ -55,31 +55,34 @@ int main()
     constexpr int P = 0;
     const uint8_t modulus_selector = get_modulus_selector(sycl_ckks::harness::default_modulus(P));
     std::vector<u32x4> output(NUM_BLOCKS);
-    sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
+    {
+        sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
-    sycl_ckks::harness::host_debug("ntt-b: creating SYCL queue");
-    auto q = sycl_ckks::harness::make_queue();
-    sycl_ckks::harness::host_debug("ntt-b: submitting drain kernel");
-    auto drain_event = q.submit([&](sycl::handler& h) {
-        sycl_ckks::harness::DrainNTTBKernel<P> kernel(output_buf);
-        kernel(h);
-    });
-    sycl_ckks::harness::host_debug("ntt-b: submitting NTT-B kernel");
-    auto ntt_event = q.submit([&](sycl::handler& h) {
-        NTTKernelB<P> kernel(modulus_selector, false);
-        kernel(h);
-    });
-    sycl_ckks::harness::host_debug("ntt-b: submitting feeder kernel");
-    auto feed_event = q.submit([&](sycl::handler& h) {
-        sycl_ckks::harness::FeedNTTBKernel<P> kernel;
-        kernel(h);
-    });
+        sycl_ckks::harness::host_debug("ntt-b: creating SYCL queue");
+        auto q = sycl_ckks::harness::make_queue();
+        sycl_ckks::harness::host_debug("ntt-b: submitting drain kernel");
+        auto drain_event = q.submit([&](sycl::handler& h) {
+            sycl_ckks::harness::DrainNTTBKernel<P> kernel(output_buf);
+            kernel(h);
+        });
+        sycl_ckks::harness::host_debug("ntt-b: submitting NTT-B kernel");
+        auto ntt_event = q.submit([&](sycl::handler& h) {
+            NTTKernelB<P> kernel(modulus_selector, false);
+            kernel(h);
+        });
+        sycl_ckks::harness::host_debug("ntt-b: submitting feeder kernel");
+        auto feed_event = q.submit([&](sycl::handler& h) {
+            sycl_ckks::harness::FeedNTTBKernel<P> kernel;
+            kernel(h);
+        });
 
-    (void)drain_event;
-    (void)ntt_event;
-    (void)feed_event;
-    sycl_ckks::harness::host_debug("ntt-b: waiting for submitted kernels");
-    q.wait_and_throw();
+        (void)drain_event;
+        (void)ntt_event;
+        (void)feed_event;
+        sycl_ckks::harness::host_debug("ntt-b: waiting for submitted kernels");
+        q.wait_and_throw();
+    }
+
     sycl_ckks::harness::host_debug("ntt-b: PASS");
 
     return 0;
