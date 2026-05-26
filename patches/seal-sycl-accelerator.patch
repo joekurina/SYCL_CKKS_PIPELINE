@@ -5,7 +5,7 @@ index 9f7ad6d..bbbbae1 100644
 @@ -13,6 +13,12 @@ option(SE_BUILD_LOCAL "Build for native instead of device" ON)
  # -- 2. If !local, m4 or a7 (on = m4)
  option(SE_BUILD_M4 "Build for M4 instead of for A7" OFF)
- 
+
 +# -- Optional SYCL CKKS accelerator integration for local tests
 +option(SE_ENABLE_SYCL_ACCELERATOR "Build local tests with external SYCL CKKS accelerator" OFF)
 +option(SE_SYCL_FPGA_HARDWARE "Link tests against a prebuilt FPGA hardware accelerator image" OFF)
@@ -18,16 +18,28 @@ index 9f7ad6d..bbbbae1 100644
 @@ -30,7 +36,7 @@ if(NOT SE_BUILD_LOCAL)
      endif()
  endif()
- 
+
 -project(SEAL_EMBEDDED VERSION 1.1.0 LANGUAGES C ASM)
 +project(SEAL_EMBEDDED VERSION 1.1.0 LANGUAGES C CXX ASM)
- 
+
  #################
  # Configuration #
-@@ -207,6 +213,28 @@ if(NOT SE_BUILD_LOCAL)
+@@ -65,6 +71,12 @@ endif()
+ message(STATUS "Build type (CMAKE_BUILD_TYPE): ${CMAKE_BUILD_TYPE}")
+
++# Suppress -g from propagating to opencl-aot --bo=-g (crashes oneAPI 2025.0.4 fpga_fast_emu)
++set(CMAKE_CXX_FLAGS_DEBUG "-fsycl -std=c++17 -Rno-debug-disables-optimization"
++    " -DCSL_USE_GMP -DCSL_SYCL -Wno-return-type-c-linkage -qactypes"
++    " -fintelfpga -DFPGA_EMULATOR")
++set(CMAKE_EXE_LINKER_FLAGS "-O0")
++
+ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+     # -- In Debug mode, enable extra compiler flags.
+     include(CheckCXXCompilerFlag)
+@@ -207,6 +219,28 @@ if(NOT SE_BUILD_LOCAL)
      endif()
  endif()
- 
+
 +if(SE_ENABLE_SYCL_ACCELERATOR)
 +    if(NOT SE_BUILD_LOCAL)
 +        message(FATAL_ERROR "SE_ENABLE_SYCL_ACCELERATOR is currently supported only with SE_BUILD_LOCAL=ON")
@@ -53,7 +65,7 @@ index 9f7ad6d..bbbbae1 100644
  if(SE_BUILD_LOCAL)
      set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY  ${CMAKE_CURRENT_BINARY_DIR}/bin)
      set(CMAKE_LIBRARY_OUTPUT_DIRECTORY  ${CMAKE_CURRENT_BINARY_DIR}/bin)
-@@ -260,6 +288,13 @@ elseif(SE_BUILD_TYPE STREQUAL "Tests")
+@@ -260,6 +294,13 @@ elseif(SE_BUILD_TYPE STREQUAL "Tests")
      if(SE_BUILD_LOCAL)
          add_executable(seal_embedded_tests ${SE_TESTS_SOURCE_FILES})
          target_link_libraries(seal_embedded_tests PRIVATE m gcc_s c seal_embedded)
@@ -74,7 +86,7 @@ index a1454bd..c84dabd 100644
 @@ -17,4 +17,10 @@ set(SE_TESTS_SOURCE_FILES ${SE_TESTS_SOURCE_FILES}
  	${CMAKE_CURRENT_LIST_DIR}/main.c
  )
- 
+
 +if(SE_ENABLE_SYCL_ACCELERATOR)
 +	set(SE_TESTS_SOURCE_FILES ${SE_TESTS_SOURCE_FILES}
 +		${CMAKE_CURRENT_LIST_DIR}/SYCL_ckks_tests_sym.c
@@ -87,19 +99,19 @@ index 511802c..2f011b8 100644
 --- a/device/test/main.c
 +++ b/device/test/main.c
 @@ -12,6 +12,9 @@ API usage.
- 
+
  #include "defines.h"
- 
+
 +#include <stdlib.h>
 +#include <string.h>
 +
  #ifndef SE_DISABLE_TESTING_CAPABILITY
  #include "util_print.h"
- 
+
 @@ -35,6 +38,11 @@ extern void test_ckks_encode_encrypt_asym(size_t n, size_t nprimes);
  extern void test_ckks_api_sym(void);
  extern void test_ckks_api_asym(void);
- 
+
 +#ifdef SE_ENABLE_SYCL_ACCELERATOR
 +extern void SYCL_test_ckks_encode_encrypt_sym(size_t n, size_t nprimes);
 +extern void SYCL_test_enc_zero_sym(size_t n, size_t nprimes);
@@ -111,7 +123,7 @@ index 511802c..2f011b8 100644
 @@ -99,44 +107,60 @@ int main(void)
      const size_t nprimes = SE_NPRIMES;
  #endif
- 
+
 -    test_sample_poly_uniform(n);
 -    test_sample_poly_ternary(n);
 -    test_sample_poly_ternary_small(n);  // Only useful when SE_USE_MALLOC is defined
@@ -134,24 +146,24 @@ index 511802c..2f011b8 100644
 +        test_sample_poly_uniform(n);
 +        test_sample_poly_ternary(n);
 +        test_sample_poly_ternary_small(n);  // Only useful when SE_USE_MALLOC is defined
- 
+
 -    test_add_uint();
 -    test_mult_uint();
 +        test_add_uint();
 +        test_mult_uint();
- 
+
 -    test_barrett_reduce();
 -    test_barrett_reduce_wide();
 +        test_barrett_reduce();
 +        test_barrett_reduce_wide();
- 
+
 -    test_add_mod();
 -    test_neg_mod();
 -    test_mul_mod();
 +        test_add_mod();
 +        test_neg_mod();
 +        test_mul_mod();
- 
+
 -    // -- Note: This test sometimes takes a while to run
 -    //    because it uses schoolbook multiplication
 -    // -- Comment it out unless you need to test it
@@ -160,25 +172,25 @@ index 511802c..2f011b8 100644
 +        //    because it uses schoolbook multiplication
 +        // -- Comment it out unless you need to test it
 +        // test_poly_mult_ntt(n, nprimes);
- 
+
 -    test_fft(n);
 +        test_fft(n);
- 
+
 -    test_enc_zero_sym(n, nprimes);
 -    test_enc_zero_asym(n, nprimes);
 +        test_enc_zero_sym(n, nprimes);
 +        test_enc_zero_asym(n, nprimes);
- 
+
 -    test_ckks_encode(n);
 +        test_ckks_encode(n);
- 
+
 -    // -- Main tests
 -    test_ckks_encode_encrypt_sym(n, nprimes);
 -    test_ckks_encode_encrypt_asym(n, nprimes);
 +        // -- Main tests
 +        test_ckks_encode_encrypt_sym(n, nprimes);
 +        test_ckks_encode_encrypt_asym(n, nprimes);
- 
+
 -    // -- Run these tests to verify api
 -    // -- Check the result with the adapter by writing output to a text file
 -    //    and passing that to the adapter "verify ciphertexts" functionality
@@ -189,12 +201,12 @@ index 511802c..2f011b8 100644
 +        //    and passing that to the adapter "verify ciphertexts" functionality
 +        // test_ckks_api_sym();
 +        // test_ckks_api_asym();
- 
+
 -    // test_network_basic();
 -    // test_network();
 +        // test_network_basic();
 +        // test_network();
- 
+
      printf("...done with all tests. All tests passed.\n");
      exit(0);
 diff --git a/device/test/SYCL_ckks_tests_sym.c b/device/test/SYCL_ckks_tests_sym.c
@@ -202,7 +214,7 @@ new file mode 100644
 index 0000000..f15d29d
 --- /dev/null
 +++ b/device/test/SYCL_ckks_tests_sym.c
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,299 @@
 +/**
 +@file SYCL_ckks_test_sym.c
 +*/
@@ -503,4 +515,3 @@ index 0000000..f15d29d
 +    bool test_message = 0;
 +    SYCL_test_ckks_sym_base(n, nprimes, test_message);
 +}
-\ No newline at end of file
