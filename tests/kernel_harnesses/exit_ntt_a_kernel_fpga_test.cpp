@@ -14,12 +14,20 @@ class FeedExitNTTAKernelTask;
 
 template <int P>
 class FeedExitNTTAKernel {
+private:
+    mutable sycl::buffer<u32x4, 1> input_buf;
+
 public:
+    explicit FeedExitNTTAKernel(sycl::buffer<u32x4, 1>& input)
+        : input_buf(input) {}
+
     void operator()(sycl::handler& h) const
     {
+        auto input = input_buf.template get_access<sycl::access::mode::read>(h);
+
         h.single_task<FeedExitNTTAKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
-            for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-                PipeSet<P>::NTTAToExitPipe::write(pattern_u32x4(blk, 20u));
+            for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+                PipeSet<P>::NTTAToExitPipe::write(input[i]);
             }
         });
     }
@@ -29,36 +37,44 @@ public:
 
 int main()
 {
-    sycl_ckks::harness::host_debug("exit-ntt-a: preparing host buffers");
+    sycl_ckks::harness::host_debug("exit-ntt-a: creating simple host test vectors");
     constexpr int P = 0;
+
+    // The exit kernel should copy exactly one input pipe into the output buffer.
+    // Keep the input obvious: one u32x4 block per index i, derived from i.
+    std::vector<u32x4> input(NUM_BLOCKS);
     std::vector<u32x4> output(NUM_BLOCKS);
+    for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+        input[i] = sycl_ckks::harness::make_test_u32x4(i);
+    }
+
     {
+        sycl::buffer<u32x4, 1> input_buf(input.data(), sycl::range<1>(NUM_BLOCKS));
         sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
-        sycl_ckks::harness::host_debug("exit-ntt-a: creating SYCL queue");
         auto q = sycl_ckks::harness::make_queue();
-        sycl_ckks::harness::host_debug("exit-ntt-a: submitting exit/drain kernel");
+
+        // ExitNTTASKernel is the kernel under test. It drains PipeSet<P>::NTTAToExitPipe into
+        // output_buf. The feeder writes the same pipe from input_buf.
         auto exit_event = q.submit([&](sycl::handler& h) {
             ExitNTTASKernel<P> kernel(output_buf);
             kernel(h);
         });
-        sycl_ckks::harness::host_debug("exit-ntt-a: submitting feeder kernel");
         auto feed_event = q.submit([&](sycl::handler& h) {
-            sycl_ckks::harness::FeedExitNTTAKernel<P> kernel;
+            sycl_ckks::harness::FeedExitNTTAKernel<P> kernel(input_buf);
             kernel(h);
         });
 
         (void)exit_event;
         (void)feed_event;
-        sycl_ckks::harness::host_debug("exit-ntt-a: waiting for submitted kernels");
         q.wait_and_throw();
     }
 
-    sycl_ckks::harness::host_debug("exit-ntt-a: kernels completed; verifying host outputs");
-
-    for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-        sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(output[blk], sycl_ckks::harness::pattern_u32x4(blk, 20u)), "ExitNTTASKernel output mismatch");
+    sycl_ckks::harness::host_debug("exit-ntt-a: comparing output with expected input copy");
+    for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+        sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(output[i], input[i]), "ExitNTTASKernel output mismatch");
     }
+
     sycl_ckks::harness::host_debug("exit-ntt-a: PASS");
     return 0;
 }

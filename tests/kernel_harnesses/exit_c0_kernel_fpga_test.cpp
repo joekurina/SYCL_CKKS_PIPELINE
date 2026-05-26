@@ -14,12 +14,20 @@ class FeedExitC0KernelTask;
 
 template <int P>
 class FeedExitC0Kernel {
+private:
+    mutable sycl::buffer<u32x4, 1> input_buf;
+
 public:
+    explicit FeedExitC0Kernel(sycl::buffer<u32x4, 1>& input)
+        : input_buf(input) {}
+
     void operator()(sycl::handler& h) const
     {
+        auto input = input_buf.template get_access<sycl::access::mode::read>(h);
+
         h.single_task<FeedExitC0KernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
-            for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-                PipeSet<P>::PolyAddToExitPipe::write(pattern_u32x4(blk, 10u));
+            for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+                PipeSet<P>::PolyAddToExitPipe::write(input[i]);
             }
         });
     }
@@ -29,36 +37,44 @@ public:
 
 int main()
 {
-    sycl_ckks::harness::host_debug("exit-c0: preparing host buffers");
+    sycl_ckks::harness::host_debug("exit-c0: creating simple host test vectors");
     constexpr int P = 0;
+
+    // The exit kernel should copy exactly one input pipe into the output buffer.
+    // Keep the input obvious: one u32x4 block per index i, derived from i.
+    std::vector<u32x4> input(NUM_BLOCKS);
     std::vector<u32x4> output(NUM_BLOCKS);
+    for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+        input[i] = sycl_ckks::harness::make_test_u32x4(i);
+    }
+
     {
+        sycl::buffer<u32x4, 1> input_buf(input.data(), sycl::range<1>(NUM_BLOCKS));
         sycl::buffer<u32x4, 1> output_buf(output.data(), sycl::range<1>(NUM_BLOCKS));
 
-        sycl_ckks::harness::host_debug("exit-c0: creating SYCL queue");
         auto q = sycl_ckks::harness::make_queue();
-        sycl_ckks::harness::host_debug("exit-c0: submitting exit/drain kernel");
+
+        // ExitC0Kernel is the kernel under test. It drains PipeSet<P>::PolyAddToExitPipe into
+        // output_buf. The feeder writes the same pipe from input_buf.
         auto exit_event = q.submit([&](sycl::handler& h) {
             ExitC0Kernel<P> kernel(output_buf);
             kernel(h);
         });
-        sycl_ckks::harness::host_debug("exit-c0: submitting feeder kernel");
         auto feed_event = q.submit([&](sycl::handler& h) {
-            sycl_ckks::harness::FeedExitC0Kernel<P> kernel;
+            sycl_ckks::harness::FeedExitC0Kernel<P> kernel(input_buf);
             kernel(h);
         });
 
         (void)exit_event;
         (void)feed_event;
-        sycl_ckks::harness::host_debug("exit-c0: waiting for submitted kernels");
         q.wait_and_throw();
     }
 
-    sycl_ckks::harness::host_debug("exit-c0: kernels completed; verifying host outputs");
-
-    for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-        sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(output[blk], sycl_ckks::harness::pattern_u32x4(blk, 10u)), "ExitC0Kernel output mismatch");
+    sycl_ckks::harness::host_debug("exit-c0: comparing output with expected input copy");
+    for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+        sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(output[i], input[i]), "ExitC0Kernel output mismatch");
     }
+
     sycl_ckks::harness::host_debug("exit-c0: PASS");
     return 0;
 }

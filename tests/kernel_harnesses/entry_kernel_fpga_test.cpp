@@ -12,6 +12,9 @@ namespace sycl_ckks::harness {
 
 class DrainEntryKernelTask;
 
+// EntryKernel is itself the feeder from an input SYCL buffer into the pipeline.
+// This drain kernel reads every pipe that EntryKernel should populate and copies
+// those pipe values into ordinary output buffers for host-side comparison.
 class DrainEntryKernel {
 private:
     mutable sycl::buffer<encoding_block, 1> encoding_out;
@@ -41,17 +44,17 @@ public:
         auto c12 = c1_out[2].template get_access<sycl::access::mode::write>(h);
 
         h.single_task<DrainEntryKernelTask>([=]() [[intel::kernel_args_restrict]] {
-            for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-                enc[blk] = SharedToIFFTPipe::read();
-                err0[blk] = ErrorToScaleReducePipes::PipeAt<0>::read();
-                err1[blk] = ErrorToScaleReducePipes::PipeAt<1>::read();
-                err2[blk] = ErrorToScaleReducePipes::PipeAt<2>::read();
-                sk0[blk] = PipeSet<0>::EntryToNTTAPipe::read();
-                sk1[blk] = PipeSet<1>::EntryToNTTAPipe::read();
-                sk2[blk] = PipeSet<2>::EntryToNTTAPipe::read();
-                c10[blk] = PipeSet<0>::EntryToPolyMultNegPipe::read();
-                c11[blk] = PipeSet<1>::EntryToPolyMultNegPipe::read();
-                c12[blk] = PipeSet<2>::EntryToPolyMultNegPipe::read();
+            for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+                enc[i] = SharedToIFFTPipe::read();
+                err0[i] = ErrorToScaleReducePipes::PipeAt<0>::read();
+                err1[i] = ErrorToScaleReducePipes::PipeAt<1>::read();
+                err2[i] = ErrorToScaleReducePipes::PipeAt<2>::read();
+                sk0[i] = PipeSet<0>::EntryToNTTAPipe::read();
+                sk1[i] = PipeSet<1>::EntryToNTTAPipe::read();
+                sk2[i] = PipeSet<2>::EntryToNTTAPipe::read();
+                c10[i] = PipeSet<0>::EntryToPolyMultNegPipe::read();
+                c11[i] = PipeSet<1>::EntryToPolyMultNegPipe::read();
+                c12[i] = PipeSet<2>::EntryToPolyMultNegPipe::read();
             }
         });
     }
@@ -61,16 +64,19 @@ public:
 
 int main()
 {
-    sycl_ckks::harness::host_debug("entry: preparing host buffers");
+    sycl_ckks::harness::host_debug("entry: creating simple host test vectors");
+
+    // Each input block is derived from its index. Conceptually this is the
+    // requested test_vector[i] = i pattern, adapted to PipelineInputBlock.
     std::vector<PipelineInputBlock> input(NUM_BLOCKS);
+    for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+        input[i] = sycl_ckks::harness::make_test_input_block(i);
+    }
+
     std::vector<encoding_block> encoding_out(NUM_BLOCKS);
     std::array<std::vector<i8x4>, NUM_MODULI> error_out;
     std::array<std::vector<u32x4>, NUM_MODULI> secret_out;
     std::array<std::vector<u32x4>, NUM_MODULI> c1_out;
-
-    for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-        input[blk] = sycl_ckks::harness::pattern_input_block(blk);
-    }
     for (size_t p = 0; p < NUM_MODULI; ++p) {
         error_out[p].resize(NUM_BLOCKS);
         secret_out[p].resize(NUM_BLOCKS);
@@ -78,6 +84,8 @@ int main()
     }
 
     {
+        // Buffers are scoped so their destructors copy device results back into
+        // the host vectors before the comparisons below run.
         sycl::buffer<PipelineInputBlock, 1> input_buf(input.data(), sycl::range<1>(NUM_BLOCKS));
         sycl::buffer<encoding_block, 1> encoding_buf(encoding_out.data(), sycl::range<1>(NUM_BLOCKS));
         std::array<sycl::buffer<i8x4, 1>, NUM_MODULI> error_bufs = {
@@ -96,34 +104,34 @@ int main()
             sycl::buffer<u32x4, 1>(c1_out[2].data(), sycl::range<1>(NUM_BLOCKS)),
         };
 
-        sycl_ckks::harness::host_debug("entry: creating SYCL queue");
         auto q = sycl_ckks::harness::make_queue();
-        sycl_ckks::harness::host_debug("entry: submitting drain kernel");
+
+        // Start the drain first so EntryKernel has consumers for every pipe it
+        // writes. The blocking pipe reads then pair with EntryKernel's writes.
         auto drain_event = q.submit([&](sycl::handler& h) {
             sycl_ckks::harness::DrainEntryKernel kernel(encoding_buf, error_bufs, secret_bufs, c1_bufs);
             kernel(h);
         });
-        sycl_ckks::harness::host_debug("entry: submitting entry kernel");
         auto entry_event = q.submit([&](sycl::handler& h) {
             EntryKernel kernel(input_buf);
             kernel(h);
         });
+
         (void)drain_event;
         (void)entry_event;
-        sycl_ckks::harness::host_debug("entry: waiting for submitted kernels");
         q.wait_and_throw();
     }
 
-    sycl_ckks::harness::host_debug("entry: kernels completed; verifying host outputs");
-
-    for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-        sycl_ckks::harness::require(sycl_ckks::harness::equal_encoding(encoding_out[blk], input[blk].encoding), "EntryKernel encoding fanout mismatch");
+    sycl_ckks::harness::host_debug("entry: comparing drained pipe data with expected fanout");
+    for (size_t i = 0; i < NUM_BLOCKS; ++i) {
+        sycl_ckks::harness::require(sycl_ckks::harness::equal_encoding(encoding_out[i], input[i].encoding), "EntryKernel encoding fanout mismatch");
         for (size_t p = 0; p < NUM_MODULI; ++p) {
-            sycl_ckks::harness::require(sycl_ckks::harness::equal_i8x4(error_out[p][blk], input[blk].error), "EntryKernel error fanout mismatch");
-            sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(secret_out[p][blk], input[blk].secret_key[p]), "EntryKernel secret-key fanout mismatch");
-            sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(c1_out[p][blk], input[blk].c1[p]), "EntryKernel c1 fanout mismatch");
+            sycl_ckks::harness::require(sycl_ckks::harness::equal_i8x4(error_out[p][i], input[i].error), "EntryKernel error fanout mismatch");
+            sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(secret_out[p][i], input[i].secret_key[p]), "EntryKernel secret-key fanout mismatch");
+            sycl_ckks::harness::require(sycl_ckks::harness::equal_u32x4(c1_out[p][i], input[i].c1[p]), "EntryKernel c1 fanout mismatch");
         }
     }
+
     sycl_ckks::harness::host_debug("entry: PASS");
     return 0;
 }

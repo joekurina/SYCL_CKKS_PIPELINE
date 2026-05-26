@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <iostream>
 
-
 namespace sycl_ckks::harness {
 
 inline void host_debug(const char* message)
@@ -39,55 +38,56 @@ inline void require(bool condition, const char* message)
     }
 }
 
-inline uint32_t pattern_u32(size_t block, size_t lane, uint32_t salt = 0)
+// The harnesses keep the input data deliberately simple. Each test first
+// creates a host-side vector where element i is derived directly from i, then
+// passes that vector to a feeder kernel through a SYCL buffer. The helpers
+// below only adapt that scalar index to the aggregate lane types used by the
+// production pipeline.
+inline uint32_t test_scalar(size_t i, uint32_t offset = 0)
 {
-    return static_cast<uint32_t>((block * LANES + lane + 1u) * 17u + salt);
+    return static_cast<uint32_t>(i) + offset;
 }
 
-inline int8_t pattern_i8(size_t block, size_t lane)
-{
-    return static_cast<int8_t>((static_cast<int>(block + lane) % 7) - 3);
-}
-
-inline encoding_block pattern_encoding(size_t block)
-{
-    const double base = static_cast<double>(block * LANES);
-    encoding_block out;
-    out.element0 = complex_double(base + 0.25, -base - 0.25);
-    out.element1 = complex_double(base + 1.25, -base - 1.25);
-    out.element2 = complex_double(base + 2.25, -base - 2.25);
-    out.element3 = complex_double(base + 3.25, -base - 3.25);
-    return out;
-}
-
-inline u32x4 pattern_u32x4(size_t block, uint32_t salt = 0)
+inline u32x4 make_test_u32x4(size_t i, uint32_t offset = 0)
 {
     u32x4 out;
-    out.element0 = pattern_u32(block, 0, salt);
-    out.element1 = pattern_u32(block, 1, salt);
-    out.element2 = pattern_u32(block, 2, salt);
-    out.element3 = pattern_u32(block, 3, salt);
+    out.element0 = test_scalar(i, offset + 0u);
+    out.element1 = test_scalar(i, offset + 1u);
+    out.element2 = test_scalar(i, offset + 2u);
+    out.element3 = test_scalar(i, offset + 3u);
     return out;
 }
 
-inline i8x4 pattern_i8x4(size_t block)
+inline i8x4 make_test_i8x4(size_t i)
 {
     i8x4 out;
-    out.element0 = pattern_i8(block, 0);
-    out.element1 = pattern_i8(block, 1);
-    out.element2 = pattern_i8(block, 2);
-    out.element3 = pattern_i8(block, 3);
+    out.element0 = static_cast<int8_t>(static_cast<int>(i) + 0);
+    out.element1 = static_cast<int8_t>(static_cast<int>(i) + 1);
+    out.element2 = static_cast<int8_t>(static_cast<int>(i) + 2);
+    out.element3 = static_cast<int8_t>(static_cast<int>(i) + 3);
     return out;
 }
 
-inline PipelineInputBlock pattern_input_block(size_t block)
+inline encoding_block make_test_encoding(size_t i)
+{
+    const double value = static_cast<double>(i);
+    encoding_block out;
+    out.element0 = complex_double(value + 0.0, 0.0);
+    out.element1 = complex_double(value + 1.0, 0.0);
+    out.element2 = complex_double(value + 2.0, 0.0);
+    out.element3 = complex_double(value + 3.0, 0.0);
+    return out;
+}
+
+inline PipelineInputBlock make_test_input_block(size_t i)
 {
     PipelineInputBlock out{};
-    out.encoding = pattern_encoding(block);
-    out.error = pattern_i8x4(block);
+    out.encoding = make_test_encoding(i);
+    out.error = make_test_i8x4(i);
     for (size_t p = 0; p < NUM_MODULI; ++p) {
-        out.secret_key[p] = pattern_u32x4(block, static_cast<uint32_t>(1000u * (p + 1u)));
-        out.c1[p] = pattern_u32x4(block, static_cast<uint32_t>(2000u * (p + 1u)));
+        const uint32_t per_modulus_offset = static_cast<uint32_t>(100u * (p + 1u));
+        out.secret_key[p] = make_test_u32x4(i, per_modulus_offset);
+        out.c1[p] = make_test_u32x4(i, per_modulus_offset + 50u);
     }
     return out;
 }
