@@ -9,42 +9,75 @@
 namespace sycl_ckks {
 
 template <int P>
-class ExitKernelTask;
+class ExitC0KernelTask;
 
 template <int P>
-class ExitKernel {
+class ExitNTTASKernelTask;
+
+template <int P>
+class ExitNTTBKernelTask;
+
+template <int P>
+class ExitC0Kernel {
 private:
-    mutable sycl::buffer<PerModulusOutputBlock, 1> output_buf;
-    bool save_ntt_s;
-    bool save_ntt_pte;
+    mutable sycl::buffer<u32x4, 1> output_buf;
 
 public:
-    ExitKernel(sycl::buffer<PerModulusOutputBlock, 1>& buf, bool save_s = false, bool save_pte = false)
-        : output_buf(buf), save_ntt_s(save_s), save_ntt_pte(save_pte) {}
+    explicit ExitC0Kernel(sycl::buffer<u32x4, 1>& buf)
+        : output_buf(buf) {}
 
     void operator()(sycl::handler& h) const {
         auto output = output_buf.template get_access<sycl::access::mode::write>(h);
-        bool kernel_save_s = save_ntt_s;
-        bool kernel_save_pte = save_ntt_pte;
 
-        h.single_task<ExitKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
+        h.single_task<ExitC0KernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
             using Pipes = PipeSet<P>;
 
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
-                PerModulusOutputBlock out_block{};
+                output[blk] = Pipes::PolyAddToExitPipe::read();
+            }
+        });
+    }
+};
 
-                out_block.c0 = Pipes::PolyAddToExitPipe::read();
+template <int P>
+class ExitNTTASKernel {
+private:
+    mutable sycl::buffer<u32x4, 1> output_buf;
 
-                if (kernel_save_s) {
-                    out_block.ntt_s = Pipes::NTTAToExitPipe::read();
-                }
+public:
+    explicit ExitNTTASKernel(sycl::buffer<u32x4, 1>& buf)
+        : output_buf(buf) {}
 
-                if (kernel_save_pte) {
-                    out_block.ntt_pte = Pipes::NTTBToExitPipe::read();
-                }
+    void operator()(sycl::handler& h) const {
+        auto output = output_buf.template get_access<sycl::access::mode::write>(h);
 
-                output[blk] = out_block;
+        h.single_task<ExitNTTASKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
+            using Pipes = PipeSet<P>;
+
+            for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
+                output[blk] = Pipes::NTTAToExitPipe::read();
+            }
+        });
+    }
+};
+
+template <int P>
+class ExitNTTBKernel {
+private:
+    mutable sycl::buffer<u32x4, 1> output_buf;
+
+public:
+    explicit ExitNTTBKernel(sycl::buffer<u32x4, 1>& buf)
+        : output_buf(buf) {}
+
+    void operator()(sycl::handler& h) const {
+        auto output = output_buf.template get_access<sycl::access::mode::write>(h);
+
+        h.single_task<ExitNTTBKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
+            using Pipes = PipeSet<P>;
+
+            for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
+                output[blk] = Pipes::NTTBToExitPipe::read();
             }
         });
     }

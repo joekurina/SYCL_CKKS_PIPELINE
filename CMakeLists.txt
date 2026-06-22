@@ -3,12 +3,52 @@ project(sycl_ckks_accelerator VERSION 0.1.0 LANGUAGES CXX)
 
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
 option(SYCL_CKKS_FPGA_SIMULATION "Build for FPGA simulator instead of emulator/hardware" OFF)
-option(SYCL_CKKS_SIMULATION_WAVEFORMS "Enable simulator waveform capture with -Xsghdl" OFF)
-set(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH "" CACHE STRING "Optional hierarchy depth for simulator waveform capture. Empty uses -Xsghdl default depth 1; 0 logs all hierarchy.")
+option(SYCL_CKKS_BUILD_KERNEL_HARNESSES "Build individual FPGA Test harness executables for internal SYCL kernels" OFF)
+set(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH "" CACHE STRING "Optional hierarchy depth for simulator -Xsghdl. Empty uses Intel oneAPI sample default -Xsghdl; 0 logs all hierarchy.")
 set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report/simulation builds")
+
+set(SYCL_CKKS_QUARTUS_ROOT "/opt/intelFPGA_pro/23.1/quartus" CACHE PATH "Quartus Pro root used for FPGA simulator/hardware flows")
+set(SYCL_CKKS_QUESTA_ROOT "/opt/intelFPGA_pro/23.1/questa_fe" CACHE PATH "Questa Intel FPGA Edition root used for FPGA simulator flows")
 
 if(SYCL_CKKS_FPGA_HARDWARE AND SYCL_CKKS_FPGA_SIMULATION)
     message(FATAL_ERROR "Choose only one FPGA backend: SYCL_CKKS_FPGA_HARDWARE or SYCL_CKKS_FPGA_SIMULATION")
+endif()
+
+if(SYCL_CKKS_FPGA_HARDWARE OR SYCL_CKKS_FPGA_SIMULATION)
+    find_program(SYCL_CKKS_QUARTUS_SH_EXECUTABLE
+        NAMES quartus_sh
+        HINTS "${SYCL_CKKS_QUARTUS_ROOT}/bin"
+        NO_DEFAULT_PATH
+    )
+    if(NOT SYCL_CKKS_QUARTUS_SH_EXECUTABLE)
+        message(FATAL_ERROR "FPGA builds require quartus_sh under SYCL_CKKS_QUARTUS_ROOT=${SYCL_CKKS_QUARTUS_ROOT}")
+    endif()
+    message(STATUS "SYCL_CKKS Quartus Pro root: ${SYCL_CKKS_QUARTUS_ROOT}")
+    message(STATUS "SYCL_CKKS quartus_sh: ${SYCL_CKKS_QUARTUS_SH_EXECUTABLE}")
+endif()
+
+if(SYCL_CKKS_FPGA_SIMULATION)
+    find_program(SYCL_CKKS_VSIM_EXECUTABLE
+        NAMES vsim
+        HINTS
+            "${SYCL_CKKS_QUESTA_ROOT}/linux_x86_64"
+            "${SYCL_CKKS_QUESTA_ROOT}/bin"
+        NO_DEFAULT_PATH
+    )
+    if(NOT SYCL_CKKS_VSIM_EXECUTABLE)
+        message(FATAL_ERROR "SYCL_CKKS_FPGA_SIMULATION requires vsim under SYCL_CKKS_QUESTA_ROOT=${SYCL_CKKS_QUESTA_ROOT}")
+    endif()
+    foreach(required_simlib
+            "${SYCL_CKKS_QUESTA_ROOT}/intel/vhdl/tennm"
+            "${SYCL_CKKS_QUESTA_ROOT}/intel/vhdl/tennm_hssi_all"
+            "${SYCL_CKKS_QUESTA_ROOT}/intel/verilog/tennm"
+            "${SYCL_CKKS_QUESTA_ROOT}/intel/verilog/tennm_hssi_all")
+        if(NOT EXISTS "${required_simlib}")
+            message(FATAL_ERROR "SYCL_CKKS_FPGA_SIMULATION requires Agilex simulation library: ${required_simlib}")
+        endif()
+    endforeach()
+    message(STATUS "SYCL_CKKS simulator Questa root: ${SYCL_CKKS_QUESTA_ROOT}")
+    message(STATUS "SYCL_CKKS simulator vsim: ${SYCL_CKKS_VSIM_EXECUTABLE}")
 endif()
 
 # Compatibility alias so workstation invocations using -DFPGA_DEVICE=... are
@@ -38,15 +78,15 @@ elseif(SYCL_CKKS_FPGA_SIMULATION)
     set(SYCL_CKKS_MERGED_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/sycl_ckks_accelerator_sim.a)
     list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS
         -Xssimulation
+    )
+    if(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH STREQUAL "")
+        list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS -Xsghdl)
+    else()
+        list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS -Xsghdl=${SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH})
+    endif()
+    list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS
         -Xstarget=${SYCL_CKKS_FPGA_DEVICE}
     )
-    if(SYCL_CKKS_SIMULATION_WAVEFORMS)
-        if(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH STREQUAL "")
-            list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS -Xsghdl)
-        else()
-            list(APPEND SYCL_CKKS_FPGA_BACKEND_FLAGS -Xsghdl=${SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH})
-        endif()
-    endif()
 else()
     message(STATUS "SYCL_CKKS emulator mode enabled")
 endif()
@@ -101,7 +141,9 @@ if(SYCL_CKKS_FPGA_SIMULATION)
     add_custom_command(
         OUTPUT ${SYCL_CKKS_MERGED_ARCHIVE}
         COMMAND ${CMAKE_COMMAND} -E rm -f ${SYCL_CKKS_MERGED_ARCHIVE}
-        COMMAND ${CMAKE_CXX_COMPILER}
+        COMMAND ${CMAKE_COMMAND} -E env
+                "PATH=${SYCL_CKKS_QUESTA_ROOT}/linux_x86_64:${SYCL_CKKS_QUESTA_ROOT}/bin:$ENV{PATH}"
+                ${CMAKE_CXX_COMPILER}
                 -v
                 -fsycl
                 -std=c++17
@@ -173,6 +215,78 @@ elseif(SYCL_CKKS_FPGA_SIMULATION)
     add_custom_target(sycl_ckks_accelerator_sim_archive
         DEPENDS ${SYCL_CKKS_MERGED_ARCHIVE}
         COMMENT "Simulation accelerator archive ready for SEAL-Embedded: ${SYCL_CKKS_MERGED_ARCHIVE}"
+    )
+endif()
+
+if(SYCL_CKKS_BUILD_KERNEL_HARNESSES)
+    if(NOT SYCL_CKKS_FPGA_SIMULATION)
+        message(FATAL_ERROR "SYCL_CKKS_BUILD_KERNEL_HARNESSES requires SYCL_CKKS_FPGA_SIMULATION=ON so harnesses use the simulator path")
+    endif()
+
+    function(add_sycl_ckks_kernel_harness target source)
+        add_executable(${target} ${source})
+        target_compile_features(${target} PRIVATE cxx_std_17)
+        target_include_directories(${target}
+            PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}
+                ${CMAKE_CURRENT_SOURCE_DIR}/include
+                ${CMAKE_CURRENT_SOURCE_DIR}/include_internal
+                ${CMAKE_CURRENT_SOURCE_DIR}/rtl
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/kernel_harnesses
+        )
+        target_compile_options(${target}
+            PRIVATE
+                -fsycl
+                -fintelfpga
+                -Rno-debug-disables-optimization
+                -DCSL_USE_GMP
+                -DCSL_SYCL
+                -Wno-return-type-c-linkage
+                -qactypes
+        )
+        target_compile_definitions(${target} PRIVATE ${SYCL_CKKS_DEVICE_COMPILE_DEFINITION})
+        set_property(TARGET ${target} PROPERTY RULE_LAUNCH_LINK
+            "${CMAKE_COMMAND} -E env PATH=${SYCL_CKKS_QUESTA_ROOT}/linux_x86_64:${SYCL_CKKS_QUESTA_ROOT}/bin:$ENV{PATH}")
+        target_link_options(${target}
+            PRIVATE
+                -fsycl
+                -std=c++17
+                -Rno-debug-disables-optimization
+                -DCSL_USE_GMP
+                -DCSL_SYCL
+                -Wno-return-type-c-linkage
+                -qactypes
+                -fintelfpga
+                ${SYCL_CKKS_FPGA_BACKEND_FLAGS}
+                ${SYCL_CKKS_DEVICE_DEFINE_FLAG}
+                LINKER:--allow-multiple-definition
+        )
+        foreach(rtl_archive IN LISTS ARGN)
+            target_link_libraries(${target} PRIVATE ${rtl_archive})
+        endforeach()
+    endfunction()
+
+    add_sycl_ckks_kernel_harness(sycl_ckks_entry_kernel_fpga_test tests/kernel_harnesses/entry_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ifft_kernel_fpga_test tests/kernel_harnesses/ifft_kernel_fpga_test.cpp ${SYCL_CKKS_IFFT_RTL_ARCHIVE})
+    add_sycl_ckks_kernel_harness(sycl_ckks_scale_and_reduce_kernel_fpga_test tests/kernel_harnesses/scale_and_reduce_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_a_kernel_fpga_test tests/kernel_harnesses/ntt_a_kernel_fpga_test.cpp ${SYCL_CKKS_NTT_RTL_ARCHIVE})
+    add_sycl_ckks_kernel_harness(sycl_ckks_ntt_b_kernel_fpga_test tests/kernel_harnesses/ntt_b_kernel_fpga_test.cpp ${SYCL_CKKS_NTT_RTL_ARCHIVE})
+    add_sycl_ckks_kernel_harness(sycl_ckks_poly_mult_neg_add_kernel_fpga_test tests/kernel_harnesses/poly_mult_neg_add_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_exit_c0_kernel_fpga_test tests/kernel_harnesses/exit_c0_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_exit_ntt_a_kernel_fpga_test tests/kernel_harnesses/exit_ntt_a_kernel_fpga_test.cpp)
+    add_sycl_ckks_kernel_harness(sycl_ckks_exit_ntt_b_kernel_fpga_test tests/kernel_harnesses/exit_ntt_b_kernel_fpga_test.cpp)
+
+    add_custom_target(sycl_ckks_kernel_harnesses
+        DEPENDS
+            sycl_ckks_entry_kernel_fpga_test
+            sycl_ckks_ifft_kernel_fpga_test
+            sycl_ckks_scale_and_reduce_kernel_fpga_test
+            sycl_ckks_ntt_a_kernel_fpga_test
+            sycl_ckks_ntt_b_kernel_fpga_test
+            sycl_ckks_poly_mult_neg_add_kernel_fpga_test
+            sycl_ckks_exit_c0_kernel_fpga_test
+            sycl_ckks_exit_ntt_a_kernel_fpga_test
+            sycl_ckks_exit_ntt_b_kernel_fpga_test
     )
 endif()
 

@@ -61,12 +61,24 @@ public:
             reg_test_verifyNTT_multi_DUT* rtl_instance = the_nwc_4k_ntt_new_instance();
 #endif
 
+            // The imported RTL NTT is a frame-oriented block that must be advanced
+            // continuously once the frame starts. Feed exactly one contiguous input
+            // frame, then keep clocking the RTL with input_valid=0 until exactly
+            // NUM_BLOCKS valid output blocks have been observed. Downstream pipes
+            // are all NUM_BLOCKS deep in this diagnostic branch, so output delivery
+            // should not backpressure the RTL clocking path.
+            size_t input_count = 0;
             size_t output_count = 0;
 
-            [[intel::initiation_interval(1)]]
-            while (true) {
+            while (output_count < NUM_BLOCKS) {
                 bool input_valid = false;
-                u32x4 input_block = Traits::InputPipe::read(input_valid);
+                u32x4 input_block{};
+
+                if (input_count < NUM_BLOCKS) {
+                    input_block = Traits::InputPipe::read();
+                    input_valid = true;
+                    input_count++;
+                }
 
                 RTLInput rtl_in;
                 rtl_in.x0 = static_cast<int32_t>(input_block.element0);
@@ -96,12 +108,10 @@ public:
                     output_block.element3 = static_cast<uint32_t>(hw_out.port_out_q_3);
 
                     Traits::DownstreamPipe::write(output_block);
-
                     if (kernel_write_exit) {
                         Traits::ExitPipe::write(output_block);
                     }
-
-                    if (++output_count >= NUM_BLOCKS) break;
+                    output_count++;
                 }
             }
 

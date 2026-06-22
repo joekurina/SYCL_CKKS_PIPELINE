@@ -32,7 +32,6 @@ public:
         h.single_task<PolyMultNegAddKernelTask<P>>([=]() [[intel::kernel_args_restrict]] {
             using Pipes = PipeSet<P>;
 
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
                 u32x4 ntt_s = Pipes::NTTAToPolyMultNegPipe::read();
                 u32x4 c1 = Pipes::EntryToPolyMultNegPipe::read();

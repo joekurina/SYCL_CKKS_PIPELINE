@@ -29,6 +29,12 @@ public:
             size_t input_count = 0;
             size_t output_count = 0;
 
+            // The imported RTL IFFT should be clocked continuously once the frame
+            // begins. Do not pause the RTL while an output beat is waiting for
+            // downstream delivery. The fanout pipes are NUM_BLOCKS deep in this
+            // diagnostic branch, so the three blocking writes should not fill before
+            // the frame has been emitted.
+
             while (output_count < NUM_BLOCKS) {
                 bool input_valid = false;
                 encoding_block block{};
@@ -57,13 +63,15 @@ public:
 #endif
 
                 if (hw_out.port_v_out_s == 1) {
-                    encoding_block out;
-                    out.element0 = complex_double(hw_out.port_data_out_0re, hw_out.port_data_out_0im);
-                    out.element1 = complex_double(hw_out.port_data_out_1re, hw_out.port_data_out_1im);
-                    out.element2 = complex_double(hw_out.port_data_out_2re, hw_out.port_data_out_2im);
-                    out.element3 = complex_double(hw_out.port_data_out_3re, hw_out.port_data_out_3im);
+                    encoding_block output_block;
+                    output_block.element0 = complex_double(hw_out.port_data_out_0re, hw_out.port_data_out_0im);
+                    output_block.element1 = complex_double(hw_out.port_data_out_1re, hw_out.port_data_out_1im);
+                    output_block.element2 = complex_double(hw_out.port_data_out_2re, hw_out.port_data_out_2im);
+                    output_block.element3 = complex_double(hw_out.port_data_out_3re, hw_out.port_data_out_3im);
 
-                    IFFTToScaleReducePipes::write(out);
+                    IFFTToScaleReducePipes::PipeAt<0>::write(output_block);
+                    IFFTToScaleReducePipes::PipeAt<1>::write(output_block);
+                    IFFTToScaleReducePipes::PipeAt<2>::write(output_block);
                     output_count++;
                 }
             }

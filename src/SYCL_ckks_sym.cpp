@@ -43,27 +43,15 @@ static void pack_input(
     }
 }
 
-static void unpack_output(
+static void unpack_u32_blocks(
     size_t n,
-    const std::vector<PerModulusOutputBlock>& output_blocks,
-    uint32_t* c0_out,
-    uint32_t* ntt_s_out,
-    uint32_t* ntt_pte_out,
-    bool has_ntt_s,
-    bool has_ntt_pte)
+    const std::vector<u32x4>& blocks,
+    uint32_t* out)
 {
     size_t num_blocks = n / LANES;
 
     for (size_t blk = 0; blk < num_blocks; ++blk) {
-        const PerModulusOutputBlock& block = output_blocks[blk];
-        unpack_block_to_scalar(block.c0, blk, c0_out);
-
-        if (has_ntt_s && ntt_s_out) {
-            unpack_block_to_scalar(block.ntt_s, blk, ntt_s_out);
-        }
-        if (has_ntt_pte && ntt_pte_out) {
-            unpack_block_to_scalar(block.ntt_pte, blk, ntt_pte_out);
-        }
+        unpack_block_to_scalar(blocks[blk], blk, out);
     }
 }
 
@@ -79,24 +67,64 @@ struct ModulusParams {
 static std::vector<event> run_pipeline(
     queue& q,
     buffer<PipelineInputBlock, 1>& input_buf,
-    std::array<buffer<PerModulusOutputBlock, 1>, NUM_MODULI>& output_bufs,
+    std::array<buffer<u32x4, 1>, NUM_MODULI>& c0_bufs,
+    std::array<buffer<u32x4, 1>, NUM_MODULI>& ntt_s_bufs,
+    std::array<buffer<u32x4, 1>, NUM_MODULI>& ntt_pte_bufs,
     const std::array<ModulusParams, NUM_MODULI>& mod_params)
 {
     try {
         std::vector<event> events;
 
         events.push_back(q.submit([&](handler& h) {
-            ExitKernel<0> kernel(output_bufs[0], mod_params[0].save_ntt_s, mod_params[0].save_ntt_pte);
+            ExitC0Kernel<0> kernel(c0_bufs[0]);
             kernel(h);
         }));
         events.push_back(q.submit([&](handler& h) {
-            ExitKernel<1> kernel(output_bufs[1], mod_params[1].save_ntt_s, mod_params[1].save_ntt_pte);
+            ExitC0Kernel<1> kernel(c0_bufs[1]);
             kernel(h);
         }));
         events.push_back(q.submit([&](handler& h) {
-            ExitKernel<2> kernel(output_bufs[2], mod_params[2].save_ntt_s, mod_params[2].save_ntt_pte);
+            ExitC0Kernel<2> kernel(c0_bufs[2]);
             kernel(h);
         }));
+
+        if (mod_params[0].save_ntt_s) {
+            events.push_back(q.submit([&](handler& h) {
+                ExitNTTASKernel<0> kernel(ntt_s_bufs[0]);
+                kernel(h);
+            }));
+        }
+        if (mod_params[1].save_ntt_s) {
+            events.push_back(q.submit([&](handler& h) {
+                ExitNTTASKernel<1> kernel(ntt_s_bufs[1]);
+                kernel(h);
+            }));
+        }
+        if (mod_params[2].save_ntt_s) {
+            events.push_back(q.submit([&](handler& h) {
+                ExitNTTASKernel<2> kernel(ntt_s_bufs[2]);
+                kernel(h);
+            }));
+        }
+
+        if (mod_params[0].save_ntt_pte) {
+            events.push_back(q.submit([&](handler& h) {
+                ExitNTTBKernel<0> kernel(ntt_pte_bufs[0]);
+                kernel(h);
+            }));
+        }
+        if (mod_params[1].save_ntt_pte) {
+            events.push_back(q.submit([&](handler& h) {
+                ExitNTTBKernel<1> kernel(ntt_pte_bufs[1]);
+                kernel(h);
+            }));
+        }
+        if (mod_params[2].save_ntt_pte) {
+            events.push_back(q.submit([&](handler& h) {
+                ExitNTTBKernel<2> kernel(ntt_pte_bufs[2]);
+                kernel(h);
+            }));
+        }
 
         events.push_back(q.submit([&](handler& h) {
             PolyMultNegAddKernel<0> kernel(mod_params[0].mod_value, mod_params[0].const_ratio);
@@ -214,11 +242,15 @@ extern "C" void SYCL_encrypt(
     std::vector<PipelineInputBlock> input_blocks;
     pack_input(n, encoding_buffer, error_samples, secret_keys, uniform_polys, input_blocks);
 
-    std::array<std::vector<PerModulusOutputBlock>, NUM_MODULI> output_blocks;
+    std::array<std::vector<u32x4>, NUM_MODULI> c0_blocks;
+    std::array<std::vector<u32x4>, NUM_MODULI> ntt_s_blocks;
+    std::array<std::vector<u32x4>, NUM_MODULI> ntt_pte_blocks;
     std::array<ModulusParams, NUM_MODULI> mod_params;
 
     for (size_t p = 0; p < NUM_MODULI; ++p) {
-        output_blocks[p].resize(num_blocks);
+        c0_blocks[p].resize(num_blocks);
+        ntt_s_blocks[p].resize(num_blocks);
+        ntt_pte_blocks[p].resize(num_blocks);
         mod_params[p].scale = scales[p];
         mod_params[p].mod_value = mod_values[p];
         mod_params[p].const_ratio[0] = const_ratios[p * 2];
@@ -230,10 +262,20 @@ extern "C" void SYCL_encrypt(
 
     buffer<PipelineInputBlock, 1> input_buf(input_blocks.data(), range(num_blocks));
 
-    std::array<buffer<PerModulusOutputBlock, 1>, NUM_MODULI> output_bufs = {
-        buffer<PerModulusOutputBlock, 1>(output_blocks[0].data(), range(num_blocks)),
-        buffer<PerModulusOutputBlock, 1>(output_blocks[1].data(), range(num_blocks)),
-        buffer<PerModulusOutputBlock, 1>(output_blocks[2].data(), range(num_blocks))
+    std::array<buffer<u32x4, 1>, NUM_MODULI> c0_bufs = {
+        buffer<u32x4, 1>(c0_blocks[0].data(), range(num_blocks)),
+        buffer<u32x4, 1>(c0_blocks[1].data(), range(num_blocks)),
+        buffer<u32x4, 1>(c0_blocks[2].data(), range(num_blocks))
+    };
+    std::array<buffer<u32x4, 1>, NUM_MODULI> ntt_s_bufs = {
+        buffer<u32x4, 1>(ntt_s_blocks[0].data(), range(num_blocks)),
+        buffer<u32x4, 1>(ntt_s_blocks[1].data(), range(num_blocks)),
+        buffer<u32x4, 1>(ntt_s_blocks[2].data(), range(num_blocks))
+    };
+    std::array<buffer<u32x4, 1>, NUM_MODULI> ntt_pte_bufs = {
+        buffer<u32x4, 1>(ntt_pte_blocks[0].data(), range(num_blocks)),
+        buffer<u32x4, 1>(ntt_pte_blocks[1].data(), range(num_blocks)),
+        buffer<u32x4, 1>(ntt_pte_blocks[2].data(), range(num_blocks))
     };
 
 #if FPGA_SIMULATOR
@@ -245,20 +287,22 @@ extern "C" void SYCL_encrypt(
 #endif
     queue q{selector, property::queue::enable_profiling()};
 
-    auto events = run_pipeline(q, input_buf, output_bufs, mod_params);
+    auto events = run_pipeline(q, input_buf, c0_bufs, ntt_s_bufs, ntt_pte_bufs, mod_params);
 
     for (auto& ev : events) {
         ev.wait();
     }
 
     for (size_t p = 0; p < NUM_MODULI; ++p) {
-        unpack_output(
-            n, output_blocks[p],
-            c0_outputs[p],
-            s_save ? s_save[p] : nullptr,
-            ntt_pte_outputs ? ntt_pte_outputs[p] : nullptr,
-            mod_params[p].save_ntt_s,
-            mod_params[p].save_ntt_pte);
+        unpack_u32_blocks(n, c0_blocks[p], c0_outputs[p]);
+
+        if (mod_params[p].save_ntt_s) {
+            unpack_u32_blocks(n, ntt_s_blocks[p], s_save[p]);
+        }
+
+        if (mod_params[p].save_ntt_pte) {
+            unpack_u32_blocks(n, ntt_pte_blocks[p], ntt_pte_outputs[p]);
+        }
     }
 
     for (size_t p = 0; p < NUM_MODULI; ++p) {

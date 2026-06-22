@@ -21,7 +21,6 @@ public:
         auto input = input_buf.template get_access<sycl::access::mode::read>(h);
 
         h.single_task<EntryKernelTask>([=]() [[intel::kernel_args_restrict]] {
-            [[intel::initiation_interval(1)]]
             for (size_t blk = 0; blk < NUM_BLOCKS; ++blk) {
                 PipelineInputBlock block = input[blk];
 
