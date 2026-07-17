@@ -42,6 +42,16 @@ using IFFTToScaleReducePipes = fpga_tools::PipeArray<
     NUM_MODULI
 >;
 
+// --- IFFT raw RTL output (IFFT -> IFFTFanout) --- BUFFERED: decouples the
+// imported RTL IFFT core (a fixed-schedule, non-stallable streaming component)
+// from the slower 3-way fanout write sequence downstream. Keeping this as its
+// own kernel-to-kernel pipe (rather than relying on the compiler's internal
+// scheduling to buffer a single loop body that mixes the RTL call with 3
+// sequential pipe writes) avoids depending on undocumented compiler-internal
+// decoupling behavior for a component that cannot honor backpressure.
+struct IFFTRawOutputPipeId {};
+using IFFTRawOutputPipe = sycl::ext::intel::pipe<IFFTRawOutputPipeId, encoding_block, PIPE_DEPTH_BUFFERED>;
+
 // --- Error fanout (Entry -> ScaleAndReduce x3) --- BUFFERED: blocked on IFFT
 struct ErrorToScaleReducePipeArrayId {};
 using ErrorToScaleReducePipes = fpga_tools::PipeArray<

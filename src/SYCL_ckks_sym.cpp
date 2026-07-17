@@ -139,31 +139,36 @@ static std::vector<event> run_pipeline(
             kernel(h);
         }));
 
-        events.push_back(q.submit([&](handler& h) {
+        // NTTKernelA/NTTKernelB are free-running (`while (1)`, see
+        // SYCL_ntt.h) and never complete on their own -- their events are
+        // deliberately not collected into `events`, matching IFFTKernel
+        // below. The caller waits on every event in that vector, and
+        // waiting on a kernel that never finishes would hang forever.
+        q.submit([&](handler& h) {
             NTTKernelA<0> kernel(mod_params[0].modulus_selector, mod_params[0].save_ntt_s);
             kernel(h);
-        }));
-        events.push_back(q.submit([&](handler& h) {
+        });
+        q.submit([&](handler& h) {
             NTTKernelA<1> kernel(mod_params[1].modulus_selector, mod_params[1].save_ntt_s);
             kernel(h);
-        }));
-        events.push_back(q.submit([&](handler& h) {
+        });
+        q.submit([&](handler& h) {
             NTTKernelA<2> kernel(mod_params[2].modulus_selector, mod_params[2].save_ntt_s);
             kernel(h);
-        }));
+        });
 
-        events.push_back(q.submit([&](handler& h) {
+        q.submit([&](handler& h) {
             NTTKernelB<0> kernel(mod_params[0].modulus_selector, mod_params[0].save_ntt_pte);
             kernel(h);
-        }));
-        events.push_back(q.submit([&](handler& h) {
+        });
+        q.submit([&](handler& h) {
             NTTKernelB<1> kernel(mod_params[1].modulus_selector, mod_params[1].save_ntt_pte);
             kernel(h);
-        }));
-        events.push_back(q.submit([&](handler& h) {
+        });
+        q.submit([&](handler& h) {
             NTTKernelB<2> kernel(mod_params[2].modulus_selector, mod_params[2].save_ntt_pte);
             kernel(h);
-        }));
+        });
 
         events.push_back(q.submit([&](handler& h) {
             ScaleAndReduceKernel<0> kernel(mod_params[0].scale, mod_params[0].mod_value, mod_params[0].const_ratio);
@@ -178,8 +183,17 @@ static std::vector<event> run_pipeline(
             kernel(h);
         }));
 
-        events.push_back(q.submit([&](handler& h) {
+        // IFFTKernel is free-running (`while (1)`, see SYCL_ifft.h) and never
+        // completes on its own -- its event is deliberately not collected
+        // into `events`. The caller waits on every event in that vector, and
+        // waiting on a kernel that never finishes would hang forever.
+        q.submit([&](handler& h) {
             IFFTKernel kernel;
+            kernel(h);
+        });
+
+        events.push_back(q.submit([&](handler& h) {
+            IFFTFanoutKernel<> kernel;
             kernel(h);
         }));
 
