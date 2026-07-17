@@ -274,37 +274,44 @@ extern "C" void SYCL_encrypt(
         mod_params[p].save_ntt_pte = save_ntt_pte_flags[p];
     }
 
-    buffer<PipelineInputBlock, 1> input_buf(input_blocks.data(), range(num_blocks));
+    {
+        // Keep SYCL ownership of the backing vectors inside this scope. Waiting
+        // for a device event completes the command, but it does not make direct
+        // access to host storage owned by a live buffer valid. Leaving the scope
+        // destroys the buffers and copies the device results back before the
+        // vectors are unpacked below.
+        buffer<PipelineInputBlock, 1> input_buf(input_blocks.data(), range(num_blocks));
 
-    std::array<buffer<u32x4, 1>, NUM_MODULI> c0_bufs = {
-        buffer<u32x4, 1>(c0_blocks[0].data(), range(num_blocks)),
-        buffer<u32x4, 1>(c0_blocks[1].data(), range(num_blocks)),
-        buffer<u32x4, 1>(c0_blocks[2].data(), range(num_blocks))
-    };
-    std::array<buffer<u32x4, 1>, NUM_MODULI> ntt_s_bufs = {
-        buffer<u32x4, 1>(ntt_s_blocks[0].data(), range(num_blocks)),
-        buffer<u32x4, 1>(ntt_s_blocks[1].data(), range(num_blocks)),
-        buffer<u32x4, 1>(ntt_s_blocks[2].data(), range(num_blocks))
-    };
-    std::array<buffer<u32x4, 1>, NUM_MODULI> ntt_pte_bufs = {
-        buffer<u32x4, 1>(ntt_pte_blocks[0].data(), range(num_blocks)),
-        buffer<u32x4, 1>(ntt_pte_blocks[1].data(), range(num_blocks)),
-        buffer<u32x4, 1>(ntt_pte_blocks[2].data(), range(num_blocks))
-    };
+        std::array<buffer<u32x4, 1>, NUM_MODULI> c0_bufs = {
+            buffer<u32x4, 1>(c0_blocks[0].data(), range(num_blocks)),
+            buffer<u32x4, 1>(c0_blocks[1].data(), range(num_blocks)),
+            buffer<u32x4, 1>(c0_blocks[2].data(), range(num_blocks))
+        };
+        std::array<buffer<u32x4, 1>, NUM_MODULI> ntt_s_bufs = {
+            buffer<u32x4, 1>(ntt_s_blocks[0].data(), range(num_blocks)),
+            buffer<u32x4, 1>(ntt_s_blocks[1].data(), range(num_blocks)),
+            buffer<u32x4, 1>(ntt_s_blocks[2].data(), range(num_blocks))
+        };
+        std::array<buffer<u32x4, 1>, NUM_MODULI> ntt_pte_bufs = {
+            buffer<u32x4, 1>(ntt_pte_blocks[0].data(), range(num_blocks)),
+            buffer<u32x4, 1>(ntt_pte_blocks[1].data(), range(num_blocks)),
+            buffer<u32x4, 1>(ntt_pte_blocks[2].data(), range(num_blocks))
+        };
 
 #if FPGA_SIMULATOR
-    auto selector = ext::intel::fpga_simulator_selector_v;
+        auto selector = ext::intel::fpga_simulator_selector_v;
 #elif FPGA_HARDWARE
-    auto selector = ext::intel::fpga_selector_v;
+        auto selector = ext::intel::fpga_selector_v;
 #else
-    auto selector = ext::intel::fpga_emulator_selector_v;
+        auto selector = ext::intel::fpga_emulator_selector_v;
 #endif
-    queue q{selector, property::queue::enable_profiling()};
+        queue q{selector, property::queue::enable_profiling()};
 
-    auto events = run_pipeline(q, input_buf, c0_bufs, ntt_s_bufs, ntt_pte_bufs, mod_params);
+        auto events = run_pipeline(q, input_buf, c0_bufs, ntt_s_bufs, ntt_pte_bufs, mod_params);
 
-    for (auto& ev : events) {
-        ev.wait();
+        for (auto& ev : events) {
+            ev.wait_and_throw();
+        }
     }
 
     for (size_t p = 0; p < NUM_MODULI; ++p) {
