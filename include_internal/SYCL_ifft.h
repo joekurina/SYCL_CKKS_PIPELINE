@@ -3,11 +3,16 @@
 #include "SYCL_common.h"
 #include "SYCL_pipes.h"
 #include "SYCL_data_types.h"
-#include "rtl/fhe_ifft_4k_4lanes_double_253_sycl.hpp"
+#include "rtl/fhe_ifft_8k_4lanes_double_261_sycl.hpp"
 #include <sycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
 
 namespace sycl_ckks {
+
+static_assert(sizeof(fhe_ifft_8k_4lanes_double_261_input_t) == 65,
+              "unexpected fhe_ifft_8k input ABI size");
+static_assert(sizeof(fhe_ifft_8k_4lanes_double_261_output_t) == 65,
+              "unexpected fhe_ifft_8k output ABI size");
 
 class IFFTKernelTask;
 
@@ -19,15 +24,15 @@ public:
         h.single_task<IFFTKernelTask>([=]() [[intel::kernel_args_restrict]] {
 
 #ifdef FPGA_EMULATOR
-            ifft4k_base_DUT* rtl_instance = fhe_ifft_4k_4lanes_double_253_new_instance();
+            ifft8k_base_DUT* rtl_instance = fhe_ifft_8k_4lanes_double_261_new_instance();
 #endif
 
             // The imported RTL IFFT is a fixed-schedule streaming core that
             // cannot be paused once a frame begins. Each output beat is handed
             // off with a single write into IFFTRawOutputPipe (BUFFERED, depth
             // NUM_BLOCKS) so this loop never shares a per-iteration schedule
-            // with the slower downstream 3-way fanout, which runs as a
-            // separate, decoupled kernel (IFFTFanoutKernel).
+            // with the slower downstream 6-way fanout, which runs as a
+            // separate, decoupled six-way kernel (IFFTFanoutKernel).
             //
             // The RTL core must be fed every single cycle with no exceptions,
             // so the input read is a non-blocking, unconditional read every
@@ -59,7 +64,7 @@ public:
                 bool input_valid = false;
                 encoding_block block = SharedToIFFTPipe::read(input_valid);
 
-                fhe_ifft_4k_4lanes_double_253_input_t hw_in;
+                fhe_ifft_8k_4lanes_double_261_input_t hw_in;
                 hw_in.port_v_in_s = input_valid;
                 hw_in.port_data_in_0re = block.element0.real();
                 hw_in.port_data_in_0im = block.element0.imag();
@@ -71,9 +76,9 @@ public:
                 hw_in.port_data_in_3im = block.element3.imag();
 
 #ifdef FPGA_EMULATOR
-                fhe_ifft_4k_4lanes_double_253_output_t hw_out = fhe_ifft_4k_4lanes_double_253(rtl_instance, hw_in);
+                fhe_ifft_8k_4lanes_double_261_output_t hw_out = fhe_ifft_8k_4lanes_double_261(rtl_instance, hw_in);
 #else
-                fhe_ifft_4k_4lanes_double_253_output_t hw_out = fhe_ifft_4k_4lanes_double_253(hw_in);
+                fhe_ifft_8k_4lanes_double_261_output_t hw_out = fhe_ifft_8k_4lanes_double_261(hw_in);
 #endif
 
                 if (hw_out.port_v_out_s == 1) {
@@ -87,7 +92,7 @@ public:
                     // pipe. The RTL core cannot be paused once started, so this
                     // loop must be able to run start-to-finish at whatever pace
                     // the DUT delivers, with no other work (like the downstream
-                    // 3-way fanout) sharing its per-iteration schedule.
+                    // 6-way fanout) sharing its per-iteration schedule.
                     IFFTRawOutputPipe::write(output_block);
                 }
             }
@@ -103,7 +108,7 @@ template <size_t TotalBeats>
 class IFFTFanoutKernelTask;
 
 // Decoupled from IFFTKernel on purpose: reads the raw RTL output at its own
-// pace and fans it out to the three per-modulus ScaleAndReduce pipes. See the
+// pace and fans it out to the six per-modulus ScaleAndReduce pipes. See the
 // comment on IFFTRawOutputPipe in SYCL_pipes.h for why this is a separate
 // kernel rather than folded into IFFTKernel's loop.
 //
@@ -125,9 +130,7 @@ public:
         h.single_task<IFFTFanoutKernelTask<TotalBeats>>([=]() [[intel::kernel_args_restrict]] {
             for (size_t i = 0; i < TotalBeats; ++i) {
                 encoding_block output_block = IFFTRawOutputPipe::read();
-                IFFTToScaleReducePipes::PipeAt<0>::write(output_block);
-                IFFTToScaleReducePipes::PipeAt<1>::write(output_block);
-                IFFTToScaleReducePipes::PipeAt<2>::write(output_block);
+                IFFTToScaleReducePipes::write(output_block);
             }
         });
     }

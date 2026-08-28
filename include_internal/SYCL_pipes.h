@@ -11,14 +11,13 @@ namespace sycl_ckks {
 // ============================================================================
 // Pipe depth rationale:
 //
-// PIPE_DEPTH_BUFFERED (1024): Used when producer runs far ahead of consumer.
-//   The IFFT kernel is a batch operation (read all -> compute -> write all),
+// PIPE_DEPTH_BUFFERED (2048): Used when producer runs far ahead of consumer.
+//   The IFFT kernel is a frame operation (read all -> compute -> write all),
 //   creating a latency gap. Pipes feeding kernels downstream of the IFFT that
 //   are written by Entry must buffer a full polynomial while the IFFT computes.
 //
-// PIPE_DEPTH_STREAMING (64): Used when producer and consumer both run at II=1
-//   in lock-step. The compiler may increase this for stall-freedom or
-//   clock-domain crossing overhead.
+// PIPE_DEPTH_STREAMING (2048): The conservative 8K configuration can absorb
+//   one complete polynomial frame on each streaming edge.
 //
 // Pipes requiring BUFFERED depth:
 //   - ErrorToScaleReducePipes: Entry writes all blocks before ScaleAndReduce
@@ -33,32 +32,32 @@ namespace sycl_ckks {
 struct SharedToIFFTPipeId {};
 using SharedToIFFTPipe = sycl::ext::intel::pipe<SharedToIFFTPipeId, encoding_block, PIPE_DEPTH_STREAMING>;
 
-// --- IFFT output fanout (IFFT -> ScaleAndReduce x3) ---
+// --- IFFT output fanout (IFFT -> ScaleAndReduce x6) ---
 struct IFFTToScaleReducePipeArrayId {};
 using IFFTToScaleReducePipes = fpga_tools::PipeArray<
     IFFTToScaleReducePipeArrayId,
     encoding_block,
     PIPE_DEPTH_STREAMING,
-    NUM_MODULI
+    NUM_PHYSICAL_PIPELINES
 >;
 
 // --- IFFT raw RTL output (IFFT -> IFFTFanout) --- BUFFERED: decouples the
 // imported RTL IFFT core (a fixed-schedule, non-stallable streaming component)
-// from the slower 3-way fanout write sequence downstream. Keeping this as its
+// from the slower 6-way fanout write sequence downstream. Keeping this as its
 // own kernel-to-kernel pipe (rather than relying on the compiler's internal
-// scheduling to buffer a single loop body that mixes the RTL call with 3
+// scheduling to buffer a single loop body that mixes the RTL call with 6
 // sequential pipe writes) avoids depending on undocumented compiler-internal
 // decoupling behavior for a component that cannot honor backpressure.
 struct IFFTRawOutputPipeId {};
 using IFFTRawOutputPipe = sycl::ext::intel::pipe<IFFTRawOutputPipeId, encoding_block, PIPE_DEPTH_BUFFERED>;
 
-// --- Error fanout (Entry -> ScaleAndReduce x3) --- BUFFERED: blocked on IFFT
+// --- Error fanout (Entry -> ScaleAndReduce x6) --- BUFFERED: blocked on IFFT
 struct ErrorToScaleReducePipeArrayId {};
 using ErrorToScaleReducePipes = fpga_tools::PipeArray<
     ErrorToScaleReducePipeArrayId,
     i8x4,
     PIPE_DEPTH_BUFFERED,
-    NUM_MODULI
+    NUM_PHYSICAL_PIPELINES
 >;
 
 template <int P>
@@ -72,12 +71,6 @@ struct PipeSet
     struct NTTAToExitPipeID {};
     struct NTTBToExitPipeID {};
     struct PolyAddToExitPipeID {};
-    struct NTTAInputPipeID {};
-    struct NTTAModSelectorPipeID {};
-    struct NTTAOutputPipeID {};
-    struct NTTBInputPipeID {};
-    struct NTTBModSelectorPipeID {};
-    struct NTTBOutputPipeID {};
 
     // STREAMING: Entry and NTTKernelA both consume at II=1
     using EntryToNTTAPipe = sycl::ext::intel::pipe<EntryToNTTAPipeID, u32x4, PIPE_DEPTH_STREAMING>;
@@ -96,28 +89,6 @@ struct PipeSet
     using NTTAToExitPipe = sycl::ext::intel::pipe<NTTAToExitPipeID, u32x4, PIPE_DEPTH_STREAMING>;
     using NTTBToExitPipe = sycl::ext::intel::pipe<NTTBToExitPipeID, u32x4, PIPE_DEPTH_STREAMING>;
     using PolyAddToExitPipe = sycl::ext::intel::pipe<PolyAddToExitPipeID, u32x4, PIPE_DEPTH_STREAMING>;
-
-    struct NTTRTLInputData {
-        int32_t x0;
-        int32_t x1;
-        int32_t x2;
-        int32_t x3;
-    };
-
-    struct NTTRTLOutputData {
-        int32_t q0;
-        int32_t q1;
-        int32_t q2;
-        int32_t q3;
-    };
-
-    // STREAMING: RTL NTT interface, lock-step with wrapper kernel
-    using NTTAInputPipe = sycl::ext::intel::pipe<NTTAInputPipeID, NTTRTLInputData, PIPE_DEPTH_STREAMING>;
-    using NTTAModSelectorPipe = sycl::ext::intel::pipe<NTTAModSelectorPipeID, uint8_t, PIPE_DEPTH_STREAMING>;
-    using NTTAOutputPipe = sycl::ext::intel::pipe<NTTAOutputPipeID, NTTRTLOutputData, PIPE_DEPTH_STREAMING>;
-    using NTTBInputPipe = sycl::ext::intel::pipe<NTTBInputPipeID, NTTRTLInputData, PIPE_DEPTH_STREAMING>;
-    using NTTBModSelectorPipe = sycl::ext::intel::pipe<NTTBModSelectorPipeID, uint8_t, PIPE_DEPTH_STREAMING>;
-    using NTTBOutputPipe = sycl::ext::intel::pipe<NTTBOutputPipeID, NTTRTLOutputData, PIPE_DEPTH_STREAMING>;
 };
 
 }

@@ -19,13 +19,15 @@ typedef double complex complex_double;
 extern "C" {
 #endif
 
-#define SYCL_NUM_MODULI 3
+#define SYCL_POLY_N 8192
+#define SYCL_NUM_MODULI 6
+#define SYCL_NUM_PHYSICAL_PIPELINES 6
 
 void SYCL_encrypt(
     size_t n,
     const double* scales,
     const uint32_t* mod_values,
-    const uint32_t* const_ratios,  // [NUM_MODULI * 2]: {cr0_p0, cr1_p0, cr0_p1, cr1_p1, ...}
+    const uint32_t* const_ratios,  // [SYCL_NUM_MODULI * 2]: {cr0_p0, cr1_p0, ...}
     const complex_double* encoding_buffer,
     const int8_t* error_samples,
     const uint32_t* const* secret_keys,

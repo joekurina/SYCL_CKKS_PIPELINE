@@ -19,7 +19,8 @@ private:
 
 public:
     PolyMultNegAddKernel(uint32_t mod, const uint32_t* cr)
-        : mod_value(mod) {
+        : mod_value(mod)
+    {
         const_ratio[0] = cr[0];
         const_ratio[1] = cr[1];
     }

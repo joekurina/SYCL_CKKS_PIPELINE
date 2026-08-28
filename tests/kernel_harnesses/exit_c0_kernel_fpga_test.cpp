@@ -57,7 +57,7 @@ int main()
         // ExitC0Kernel is the kernel under test. It drains PipeSet<P>::PolyAddToExitPipe into
         // output_buf. The feeder writes the same pipe from input_buf.
         auto exit_event = q.submit([&](sycl::handler& h) {
-            ExitC0Kernel<P> kernel(output_buf);
+            ExitC0Kernel<P, NUM_BLOCKS> kernel(output_buf);
             kernel(h);
         });
         auto feed_event = q.submit([&](sycl::handler& h) {

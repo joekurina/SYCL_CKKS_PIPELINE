@@ -104,10 +104,9 @@ int main()
             kernel(h);
         });
 
-        (void)drain_event;
         (void)ntt_event;
-        (void)feed_event;
-        q.wait_and_throw();
+        feed_event.wait_and_throw();
+        drain_event.wait_and_throw();
     }
 
     sycl_ckks::harness::host_debug("ntt-b: comparing downstream and exit copies of RTL output");

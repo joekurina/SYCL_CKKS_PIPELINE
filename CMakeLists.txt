@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(sycl_ckks_accelerator VERSION 0.1.0 LANGUAGES CXX)
+project(sycl_ckks_accelerator VERSION 0.2.0 LANGUAGES CXX)
 
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
 option(SYCL_CKKS_FPGA_SIMULATION "Build for FPGA simulator instead of emulator/hardware" OFF)
@@ -129,8 +129,8 @@ target_compile_options(sycl_ckks_accelerator_obj PRIVATE
 )
 target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE ${SYCL_CKKS_DEVICE_COMPILE_DEFINITION})
 
-set(SYCL_CKKS_NTT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_4k_ntt.a)
-set(SYCL_CKKS_IFFT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_4k_4lanes_double_253.a)
+set(SYCL_CKKS_NTT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/the_nwc_8k_ntt.a)
+set(SYCL_CKKS_IFFT_RTL_ARCHIVE ${CMAKE_CURRENT_SOURCE_DIR}/rtl/fhe_ifft_8k_4lanes_double_261.a)
 
 if(SYCL_CKKS_FPGA_SIMULATION)
     # Simulator image archive. This uses -fsycl-link=image because the

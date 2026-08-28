@@ -57,7 +57,7 @@ int main()
         // ExitNTTASKernel is the kernel under test. It drains PipeSet<P>::NTTAToExitPipe into
         // output_buf. The feeder writes the same pipe from input_buf.
         auto exit_event = q.submit([&](sycl::handler& h) {
-            ExitNTTASKernel<P> kernel(output_buf);
+            ExitNTTASKernel<P, NUM_BLOCKS> kernel(output_buf);
             kernel(h);
         });
         auto feed_event = q.submit([&](sycl::handler& h) {

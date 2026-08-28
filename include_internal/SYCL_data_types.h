@@ -52,8 +52,8 @@ static_assert(sizeof(i64x4) == sizeof(int64_t) * 4, "i64x4 size mismatch");
 struct PipelineInputBlock {
     encoding_block encoding;
     i8x4 error;
-    u32x4 secret_key[NUM_MODULI];
-    u32x4 c1[NUM_MODULI];
+    u32x4 secret_key[NUM_PHYSICAL_PIPELINES];
+    u32x4 c1[NUM_PHYSICAL_PIPELINES];
 };
 
 struct PerModulusOutputBlock {

@@ -5,17 +5,20 @@
 
 namespace sycl_ckks {
 
-constexpr size_t POLY_N = 4096;
-constexpr size_t POLY_LOGN = 12;
+constexpr size_t POLY_N = 8192;
+constexpr size_t POLY_LOGN = 13;
 constexpr size_t LANES = 4;
 constexpr size_t NUM_BLOCKS = POLY_N / LANES;
+constexpr size_t NUM_PHYSICAL_PIPELINES = 6;
+constexpr size_t NUM_MODULI = 6;
+static_assert(NUM_MODULI == NUM_PHYSICAL_PIPELINES,
+              "the 8K design assigns one physical pipeline to each modulus");
 constexpr size_t PIPE_DEPTH_BUFFERED = NUM_BLOCKS;   // Pipes that must buffer a full polynomial
-                                                      // (producer far ahead of consumer due to IFFT batch latency)
+                                                      // (producer far ahead of consumer due to IFFT frame latency)
 //constexpr size_t PIPE_DEPTH_STREAMING = 64;           // Pipes where producer/consumer run at II=1 in lock-step
                                                       // (compiler may increase beyond this for stall-freedom)
 
-constexpr int MAX_PIPELINES = 3;
-constexpr size_t NUM_MODULI = 3;
+constexpr int MAX_PIPELINES = static_cast<int>(NUM_PHYSICAL_PIPELINES);
 constexpr size_t PIPE_DEPTH_STREAMING = NUM_BLOCKS;
 
 // ============================================================================
@@ -221,27 +224,18 @@ inline void lane_transform2(const InStruct1& in1, const InStruct2& in2,
     out.element3 = func(in1.element3, in2.element3);
 }
 
-// Modulus selector for RTL NTT core (maps modulus value to hardware selector index)
+// Modulus selector for the 8K RTL NTT core. Its six channels are numbered 0-5
+// in the same order as SEAL-Embedded's 30-bit 8K modulus chain.
 inline uint8_t get_modulus_selector(uint32_t mod_value)
 {
     switch (mod_value) {
-        case 134012929u:  return 0;
-        case 134111233u:  return 1;
-        case 134176769u:  return 2;
-        case 1053818881u: return 3;
-        case 1054015489u: return 4;
-        case 1054212097u: return 5;
-        case 1055260673u: return 6;
-        case 1056178177u: return 7;
-        case 1056440321u: return 8;
-        case 1058209793u: return 9;
-        case 1060175873u: return 10;
-        case 1060700161u: return 11;
-        case 1060765697u: return 12;
-        case 1061093377u: return 13;
-        case 1062469633u: return 14;
-        case 1062535169u: return 15;
-        default:          return 0;
+        case 1053818881u: return 0;
+        case 1054015489u: return 1;
+        case 1054212097u: return 2;
+        case 1055260673u: return 3;
+        case 1056178177u: return 4;
+        case 1056440321u: return 5;
+        default:          return 0xff;
     }
 }
 

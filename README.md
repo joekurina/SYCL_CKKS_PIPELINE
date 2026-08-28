@@ -1,6 +1,14 @@
 # SYCL CKKS Accelerator
 
-Standalone Intel oneAPI/SYCL FPGA-emulator library for the CKKS symmetric-encryption accelerator pipeline extracted from the invasive SEAL-Embedded thesis tree.
+Standalone Intel oneAPI/SYCL FPGA accelerator library for an 8192-coefficient CKKS symmetric-encryption pipeline extracted from the invasive SEAL-Embedded thesis tree.
+
+The active design contract is fixed at:
+
+- polynomial degree `N = 8192` (`POLY_LOGN = 13`)
+- four coefficients per imported-RTL beat (`2048` beats per frame)
+- six 30-bit SEAL-Embedded coefficient moduli
+- six physical arithmetic pipelines processing all six moduli concurrently
+- `the_nwc_8k_ntt` and `fhe_ifft_8k_4lanes_double_261` imported RTL components
 
 ## Scope
 
@@ -106,6 +114,12 @@ The first-pass SEAL integration should use a simple path variable:
 ```
 
 Do not add polished `find_package(...)` integration until the simple path-based build is working.
+
+The patch in `patches/seal-sycl-accelerator.patch` targets the clean
+SEAL-Embedded Version 1.1.0 baseline (`0913fa9`). Its FPGA Test selects
+`n = 8192` and `nprimes = 6`, and it rejects an accelerator public header
+whose `SYCL_POLY_N`, `SYCL_NUM_MODULI`, or
+`SYCL_NUM_PHYSICAL_PIPELINES` contract differs.
 
 ## FPGA Test policy
 

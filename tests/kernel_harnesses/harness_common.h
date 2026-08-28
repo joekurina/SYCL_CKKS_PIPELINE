@@ -84,7 +84,7 @@ inline PipelineInputBlock make_test_input_block(size_t i)
     PipelineInputBlock out{};
     out.encoding = make_test_encoding(i);
     out.error = make_test_i8x4(i);
-    for (size_t p = 0; p < NUM_MODULI; ++p) {
+    for (size_t p = 0; p < NUM_PHYSICAL_PIPELINES; ++p) {
         const uint32_t per_modulus_offset = static_cast<uint32_t>(100u * (p + 1u));
         out.secret_key[p] = make_test_u32x4(i, per_modulus_offset);
         out.c1[p] = make_test_u32x4(i, per_modulus_offset + 50u);
@@ -122,6 +122,9 @@ inline uint32_t default_modulus(size_t p)
         1053818881u,
         1054015489u,
         1054212097u,
+        1055260673u,
+        1056178177u,
+        1056440321u,
     };
     return mods[p];
 }
