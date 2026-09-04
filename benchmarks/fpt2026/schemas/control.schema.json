@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpt2026.local/schemas/control.schema.json",
+  "title": "Host/device control snapshot",
+  "type": "object",
+  "required": ["schema_version", "record_type", "run_id", "snapshot_id", "attempt_id", "phase", "captured_utc", "hostname", "processes", "thermal", "power", "fpga"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "record_type": {"const": "control_snapshot"},
+    "run_id": {"type": "string"},
+    "snapshot_id": {"type": "string"},
+    "attempt_id": {"type": "string"},
+    "phase": {"enum": ["pre", "post"]},
+    "captured_utc": {"type": "string", "format": "date-time"},
+    "hostname": {"type": "string"},
+    "processes": {"type": "array", "items": {"type": "object"}},
+    "thermal": {"type": "object"},
+    "power": {"type": "object"},
+    "fpga": {"type": "object"},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

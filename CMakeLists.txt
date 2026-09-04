@@ -4,6 +4,7 @@ project(sycl_ckks_accelerator VERSION 0.2.0 LANGUAGES CXX)
 option(SYCL_CKKS_FPGA_HARDWARE "Build for FPGA hardware instead of emulator" OFF)
 option(SYCL_CKKS_FPGA_SIMULATION "Build for FPGA simulator instead of emulator/hardware" OFF)
 option(SYCL_CKKS_BUILD_KERNEL_HARNESSES "Build individual FPGA Test harness executables for internal SYCL kernels" OFF)
+option(SYCL_CKKS_BUILD_BENCHMARK_SOURCE_FPGA_TESTS "Build additive benchmark API source FPGA Tests without registering them for execution" OFF)
 set(SYCL_CKKS_SIMULATION_WAVEFORM_DEPTH "" CACHE STRING "Optional hierarchy depth for simulator -Xsghdl. Empty uses Intel oneAPI sample default -Xsghdl; 0 logs all hierarchy.")
 set(SYCL_CKKS_FPGA_DEVICE "Agilex7" CACHE STRING "FPGA target device for hardware/report/simulation builds")
 
@@ -314,6 +315,38 @@ else()
         -DFPGA_EMULATOR
         -O0
     )
+endif()
+
+if(SYCL_CKKS_BUILD_BENCHMARK_SOURCE_FPGA_TESTS)
+    enable_language(C)
+    target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE SYCL_CKKS_BENCHMARK_PRIVATE_TEST=1)
+
+    add_library(sycl_ckks_benchmark_c_api_fpga_test OBJECT EXCLUDE_FROM_ALL
+        tests/benchmark/benchmark_c_api_fpga_test.c)
+    set_target_properties(sycl_ckks_benchmark_c_api_fpga_test PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED YES
+        C_EXTENSIONS NO)
+    target_include_directories(sycl_ckks_benchmark_c_api_fpga_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+    add_library(sycl_ckks_benchmark_cpp_api_fpga_test OBJECT EXCLUDE_FROM_ALL
+        tests/benchmark/benchmark_cpp_api_fpga_test.cpp)
+    target_compile_features(sycl_ckks_benchmark_cpp_api_fpga_test PRIVATE cxx_std_17)
+    target_include_directories(sycl_ckks_benchmark_cpp_api_fpga_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+    add_library(sycl_ckks_benchmark_lifecycle_fpga_test OBJECT EXCLUDE_FROM_ALL
+        tests/benchmark/benchmark_lifecycle_fpga_test.cpp)
+    target_compile_features(sycl_ckks_benchmark_lifecycle_fpga_test PRIVATE cxx_std_17)
+    target_include_directories(sycl_ckks_benchmark_lifecycle_fpga_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+    add_custom_target(sycl_ckks_benchmark_source_fpga_tests
+        DEPENDS
+            sycl_ckks_benchmark_c_api_fpga_test
+            sycl_ckks_benchmark_cpp_api_fpga_test
+            sycl_ckks_benchmark_lifecycle_fpga_test)
 endif()
 
 install(FILES ${SYCL_CKKS_MERGED_ARCHIVE}

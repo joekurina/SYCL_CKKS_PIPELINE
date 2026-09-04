@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpt2026.local/schemas/manifest.schema.json",
+  "title": "FPT 2026 immutable planning documents",
+  "oneOf": [
+    {"$ref": "#/$defs/root_manifest"},
+    {"$ref": "#/$defs/planned_unit_array_document"},
+    {"$ref": "#/$defs/e8_amendment"},
+    {"$ref": "#/$defs/e4_amendment"},
+    {"$ref": "#/$defs/effective_plan_snapshot"}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolute_path": {"type": "string", "pattern": "^/"},
+    "count_set": {
+      "type": "object",
+      "required": ["attempts", "attempt_rows", "control_snapshots", "frames", "event_rows", "correctness_rows", "timing_rows"],
+      "properties": {
+        "attempts": {"type": "integer", "minimum": 0},
+        "attempt_rows": {"type": "integer", "minimum": 0},
+        "control_snapshots": {"type": "integer", "minimum": 0},
+        "frames": {"type": "integer", "minimum": 0},
+        "event_rows": {"type": "integer", "minimum": 0},
+        "correctness_rows": {"type": "integer", "minimum": 0},
+        "timing_rows": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["artifact_id", "path", "sha256"],
+      "properties": {
+        "artifact_id": {"type": "string", "minLength": 1},
+        "path": {"$ref": "#/$defs/absolute_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "ciphertext_context": {
+      "type": "object",
+      "required": ["poly_modulus_degree", "slot_count", "data_moduli", "special_prime_bits", "scale_log2", "ciphertext_size", "ciphertext_modulus_count", "physical_pipelines", "special_prime", "key_context_moduli", "key_parms_id_words", "first_parms_id_words", "key_parms_id_bytes_sha256", "first_parms_id_bytes_sha256", "ciphertext_is_ntt_form", "pipeline_input_block_size", "uint32_size", "key_pair_verification"],
+      "properties": {
+        "poly_modulus_degree": {"const": 8192},
+        "slot_count": {"const": 4096},
+        "data_moduli": {"type": "array", "items": {"type": "integer", "minimum": 2}, "minItems": 6, "maxItems": 6, "uniqueItems": true},
+        "special_prime_bits": {"const": 38},
+        "scale_log2": {"const": 25},
+        "ciphertext_size": {"const": 2},
+        "ciphertext_modulus_count": {"const": 6},
+        "physical_pipelines": {"const": 6},
+        "special_prime": {"type": "integer", "minimum": 2},
+        "key_context_moduli": {"type": "array", "items": {"type": "integer", "minimum": 2}, "minItems": 7, "maxItems": 7, "uniqueItems": true},
+        "key_parms_id_words": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 4, "maxItems": 4},
+        "first_parms_id_words": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 4, "maxItems": 4},
+        "key_parms_id_bytes_sha256": {"$ref": "#/$defs/sha256"},
+        "first_parms_id_bytes_sha256": {"$ref": "#/$defs/sha256"},
+        "ciphertext_is_ntt_form": {"const": true},
+        "pipeline_input_block_size": {"type": "integer", "minimum": 1},
+        "uint32_size": {"const": 4},
+        "key_pair_verification": {
+          "type": "object",
+          "required": ["attempt_id", "status"],
+          "properties": {"attempt_id": {"type": "string", "minLength": 1}, "status": {"const": "pass"}},
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "planned_unit": {
+      "type": "object",
+      "required": ["planned_unit_id", "experiment_id", "child_attempts", "frames", "event_rows", "correctness_rows", "timing_rows"],
+      "properties": {
+        "planned_unit_id": {"type": "string", "minLength": 1},
+        "experiment_id": {"type": "string", "pattern": "^E[1-8]$"},
+        "initial_status": {"enum": ["pending"]},
+        "backend": {"type": "string"},
+        "batch_size": {"type": "integer", "minimum": 1},
+        "child_attempts": {"type": "integer", "minimum": 0},
+        "frames": {"type": "integer", "minimum": 0},
+        "event_rows": {"type": "integer", "minimum": 0},
+        "correctness_rows": {"type": "integer", "minimum": 0},
+        "timing_rows": {"type": "integer", "minimum": 0},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "root_manifest": {
+      "type": "object",
+      "required": ["schema_version", "document_type", "run_id", "campaign_id", "created_utc", "paper_eligible", "paths", "pinned_revisions", "repository_state", "artifacts", "report_tree_manifest_sha256", "environment_sha256", "artifact_index_sha256", "configuration_sha256", "base_plan_sha256", "base_effective_plan_sha256", "timeouts", "parameters", "planned_counts", "branch_state"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "document_type": {"const": "root_manifest"},
+        "run_id": {"type": "string", "minLength": 1},
+        "campaign_id": {"const": "fpt2026-paper-matrix-v1"},
+        "created_utc": {"type": "string", "format": "date-time"},
+        "paths": {"type": "object", "additionalProperties": {"$ref": "#/$defs/absolute_path"}},
+        "pinned_revisions": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "artifacts": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+        "base_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "base_effective_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "paper_eligible": {"type": "boolean"},
+        "repository_state": {"type": "object"},
+        "report_tree_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "environment_sha256": {"$ref": "#/$defs/sha256"},
+        "artifact_index_sha256": {"$ref": "#/$defs/sha256"},
+        "timeouts": {"type": "object", "additionalProperties": {"type": "number", "exclusiveMinimum": 0}},
+        "parameters": {"$ref": "#/$defs/ciphertext_context"},
+        "planned_counts": {"$ref": "#/$defs/count_set"},
+        "branch_state": {
+          "type": "object",
+          "required": ["e8_extension", "e4_sustained"],
+          "properties": {
+            "e8_extension": {"enum": ["pending"]},
+            "e4_sustained": {"enum": ["pending"]}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "planned_unit_array_document": {
+      "type": "object",
+      "required": ["schema_version", "document_type", "planned_units", "declared_counts"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "document_type": {"enum": ["planned_units_base", "planned_units_e8_extension", "planned_units_e4_sustained"]},
+        "planned_units": {"type": "array", "items": {"$ref": "#/$defs/planned_unit"}},
+        "declared_counts": {"$ref": "#/$defs/count_set"}
+      },
+      "additionalProperties": false
+    },
+    "e8_amendment": {
+      "type": "object",
+      "required": ["schema_version", "document_type", "triggered", "terminal_status", "base_effective_plan_sha256", "evidence_sha256", "extension_plan_sha256", "declared_counts", "saturation_analysis", "created_utc"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "document_type": {"const": "manifest_amendment_e8"},
+        "triggered": {"type": "boolean"},
+        "terminal_status": {"enum": ["applicable", "not_applicable"]},
+        "base_effective_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "evidence_sha256": {"$ref": "#/$defs/sha256"},
+        "extension_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "declared_counts": {"$ref": "#/$defs/count_set"},
+        "saturation_analysis": {"type": "object"},
+        "reason": {"type": "string"},
+        "created_utc": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "e4_amendment": {
+      "type": "object",
+      "required": ["schema_version", "document_type", "terminal_status", "B_E4", "e8_effective_plan_sha256", "e8_evidence_sha256", "full_batches", "partial_batches", "final_partial_batch_size", "timing_rows", "sustained_plan_sha256", "declared_counts", "created_utc"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "document_type": {"const": "manifest_amendment_e4"},
+        "terminal_status": {"const": "applicable"},
+        "B_E4": {"type": "integer", "minimum": 1, "maximum": 64},
+        "e8_effective_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "e8_evidence_sha256": {"$ref": "#/$defs/sha256"},
+        "full_batches": {"type": "integer", "minimum": 0},
+        "partial_batches": {"type": "integer", "minimum": 0, "maximum": 1},
+        "final_partial_batch_size": {"type": "integer", "minimum": 0, "maximum": 63},
+        "timing_rows": {"type": "integer", "minimum": 1},
+        "sustained_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "declared_counts": {"$ref": "#/$defs/count_set"},
+        "created_utc": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "effective_plan_snapshot": {
+      "type": "object",
+      "required": ["schema_version", "document_type", "phase", "predecessor_sha256", "component_sha256s", "planned_unit_ids", "declared_counts", "created_utc"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "document_type": {"const": "effective_plan_snapshot"},
+        "phase": {"enum": ["base", "base+e8", "base+e8+e4"]},
+        "predecessor_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "component_sha256s": {"type": "array", "items": {"$ref": "#/$defs/sha256"}, "minItems": 1, "uniqueItems": true},
+        "planned_unit_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "declared_counts": {"$ref": "#/$defs/count_set"},
+        "created_utc": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

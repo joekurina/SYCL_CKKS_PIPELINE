@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "campaign_id": "fpt2026-paper-matrix-v1",
+  "paths": {
+    "accelerator_repository": "/home/joe/Projects/Thesis/new/SYCL_Pipeline",
+    "seal_embedded_repository": "/home/joe/Projects/Thesis/new/SEAL-Embedded",
+    "benchmark_project": "/home/joe/Projects/Thesis/new/SYCL_Pipeline/benchmarks/fpt2026",
+    "fpga_report_root": "/home/joe/Documents/reports_8k/reports"
+  },
+  "pinned_revisions": {
+    "accelerator_branch": "8k_benchmarks",
+    "accelerator_baseline_branch": "8k-pipeline",
+    "accelerator_baseline_commit": "205e39ddaad1c67d87bae861faf2bf435bab51ae",
+    "seal_embedded_commit": "0913fa9afe1f2bdc0d995f853a685aceea6d3cd0",
+    "microsoft_seal_commit": "79234726053c45eede688400aa219fdec0810bd8"
+  },
+  "expected_artifact_sha256": {
+    "accelerator_archive": "e6ff8d000721a9d473a51a01dec2c194967a5412b5883d2b5ae1728619a79300",
+    "gbs": "1334e610f11da82606b8ced01734c93912d2f927d3b5a5b015b3e8a6f9a84d1d"
+  },
+  "toolchain": {
+    "fpga_target": "AGFB027R25A2E2V",
+    "quartus_version": "23.1.0 Build 115 Pro",
+    "fpga_backend_version": "2025.0.0",
+    "seed7_host_compiler_version": "2025.0.4",
+    "fitter_seed": 7
+  },
+  "ckks": {
+    "poly_modulus_degree": 8192,
+    "slot_count": 4096,
+    "data_moduli": [1053818881, 1054015489, 1054212097, 1055260673, 1056178177, 1056440321],
+    "special_prime_bits": 38,
+    "scale_log2": 25,
+    "ciphertext_size": 2,
+    "ciphertext_modulus_count": 6,
+    "physical_pipelines": 6
+  },
+  "event_records_per_frame": {
+    "performance": 27,
+    "one_ntt_save_stream": 39,
+    "full_diagnostics": 51
+  },
+  "statistics": {
+    "descriptive": ["min", "p5", "p25", "median", "p75", "p95", "max", "mad", "iqr"],
+    "bootstrap_resamples": 10000,
+    "bootstrap_confidence": 0.95,
+    "minimum_ci_observations": 2,
+    "bootstrap_algorithm": "percentile-v1"
+  },
+  "matrix": {
+    "base": {"attempts": 32, "attempt_rows": 64, "control_snapshots": 64, "frames": 5654, "event_rows": 150336, "correctness_rows": 5722, "fixed_timing_rows": 350},
+    "e8_extension": {"attempts": 1, "attempt_rows": 2, "control_snapshots": 2, "frames": 16128, "event_rows": 435456, "correctness_rows": 16128, "fixed_timing_rows": 40},
+    "e4_sustained": {"attempts": 1, "attempt_rows": 2, "control_snapshots": 2, "frames": 10000, "event_rows": 270000, "correctness_rows": 10000, "timing_rows_formula": "ceil(10000/B_E4)"},
+    "terminal_experiment_status_rows": 8
+  },
+  "experiments": {
+    "E1": {"kind": "hardware_correctness_gate"},
+    "E2": {"kind": "latency", "measured_repetitions": 50},
+    "E3": {"kind": "resource_and_fmax_extraction"},
+    "E4": {"kind": "process_and_sustained", "resident_frames": 10000},
+    "E5": {"kind": "semantic_coverage", "rows": {"fpga": 40, "seal_embedded": 25, "stock_seal": 15}},
+    "E6": {"kind": "matched_speedup"},
+    "E7": {"kind": "prior_work_extraction"},
+    "E8": {"kind": "batch_scaling", "base_batch_sizes": [1, 2, 4, 8, 16, 32, 64, 128], "extension_batch_sizes": [256, 512]}
+  },
+  "runtime_derived_fields": {
+    "artifact_hashes": null,
+    "special_prime": null,
+    "key_parms_id_words": null,
+    "first_parms_id_words": null,
+    "B_E4": null
+  }
+}

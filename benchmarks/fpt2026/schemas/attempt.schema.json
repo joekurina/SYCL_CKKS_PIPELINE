@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpt2026.local/schemas/attempt.schema.json",
+  "title": "Attempt journal record",
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "path": {"type": "string", "pattern": "^/"}},
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version", "record_type", "run_id", "attempt_id", "experiment_id", "planned_unit_id", "effective_plan_sha256", "command", "command_sha256", "environment", "environment_sha256", "working_directory", "planned_sample_count", "planned_frame_count", "timeout_seconds", "pre_control_snapshot_id", "started_utc"],
+      "properties": {
+        "schema_version": {"const": "1.0"}, "record_type": {"const": "attempt_started"}, "run_id": {"type": "string"}, "attempt_id": {"type": "string"}, "experiment_id": {"type": "string", "pattern": "^E[1-8]$"}, "planned_unit_id": {"type": "string"}, "effective_plan_sha256": {"$ref": "#/$defs/sha256"}, "command": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "command_sha256": {"$ref": "#/$defs/sha256"}, "environment": {"type": "object", "additionalProperties": {"type": "string"}}, "environment_sha256": {"$ref": "#/$defs/sha256"}, "working_directory": {"$ref": "#/$defs/path"}, "planned_sample_count": {"type": "integer", "minimum": 0}, "planned_frame_count": {"type": "integer", "minimum": 0}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0}, "pre_control_snapshot_id": {"type": "string"}, "started_utc": {"type": "string", "format": "date-time"}
+      }, "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "record_type", "run_id", "attempt_id", "experiment_id", "terminal_status", "timed_out", "observed_sample_count", "observed_frame_count", "post_control_snapshot_id", "stdout_path", "stdout_sha256", "stderr_path", "stderr_sha256", "finished_utc"],
+      "properties": {
+        "schema_version": {"const": "1.0"}, "record_type": {"const": "attempt_finished"}, "run_id": {"type": "string"}, "attempt_id": {"type": "string"}, "experiment_id": {"type": "string", "pattern": "^E[1-8]$"}, "terminal_status": {"enum": ["exited", "signaled", "timed_out", "launch_failed"]}, "exit_code": {"type": ["integer", "null"]}, "signal": {"type": ["integer", "null"]}, "timed_out": {"type": "boolean"}, "observed_sample_count": {"type": "integer", "minimum": 0}, "observed_frame_count": {"type": "integer", "minimum": 0}, "last_progress_id": {"type": ["string", "null"]}, "post_control_snapshot_id": {"type": "string"}, "stdout_path": {"$ref": "#/$defs/path"}, "stdout_sha256": {"$ref": "#/$defs/sha256"}, "stderr_path": {"$ref": "#/$defs/path"}, "stderr_sha256": {"$ref": "#/$defs/sha256"}, "finished_utc": {"type": "string", "format": "date-time"}
+      }, "additionalProperties": false
+    }
+  ]
+}

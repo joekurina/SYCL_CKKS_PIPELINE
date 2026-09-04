@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpt2026.local/schemas/sample.schema.json",
+  "title": "FPT 2026 timing sample",
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable_ns": {"type": ["integer", "null"], "minimum": 0}
+  },
+  "type": "object",
+  "required": ["schema_version", "record_type", "run_id", "sample_id", "attempt_id", "planned_unit_id", "experiment_id", "backend", "boundary_id", "phase", "case_id", "repetition", "trial_seed_index", "batch_size", "frame_count_submitted", "frame_count_completed", "input", "control_snapshot_ids", "mode", "timing_ns", "timing_unavailable_reasons", "event_record_ids", "event_frontiers", "bytes", "correctness_record_ids", "correctness_summary", "status", "error"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "record_type": {"const": "timing_sample"},
+    "run_id": {"type": "string", "minLength": 1},
+    "sample_id": {"type": "string", "minLength": 1},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "planned_unit_id": {"type": "string", "minLength": 1},
+    "experiment_id": {"type": "string", "pattern": "^E[1-8]$"},
+    "backend": {"enum": ["fpga", "seal-embedded", "stock-seal"]},
+    "boundary_id": {"const": "application_e2e_v1"},
+    "phase": {"type": "string", "minLength": 1},
+    "case_id": {"type": "string", "minLength": 1},
+    "repetition": {"type": "integer", "minimum": 0},
+    "trial_seed_index": {"type": "integer", "minimum": 0},
+    "batch_size": {"type": "integer", "minimum": 1},
+    "frame_count_submitted": {"type": "integer", "minimum": 1},
+    "frame_count_completed": {"type": "integer", "minimum": 0},
+    "input": {
+      "type": "object",
+      "required": ["vector_descriptor_sha256", "trial_seed_digest", "benchmark_key_pair_id"],
+      "properties": {
+        "vector_descriptor_sha256": {"$ref": "#/$defs/sha256"},
+        "trial_seed_digest": {"$ref": "#/$defs/sha256"},
+        "benchmark_key_pair_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "control_snapshot_ids": {
+      "type": "object",
+      "required": ["before", "after"],
+      "properties": {"before": {"type": "string"}, "after": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "mode": {
+      "type": "object",
+      "required": ["save_ntt_s", "save_ntt_pte"],
+      "properties": {"save_ntt_s": {"type": "boolean"}, "save_ntt_pte": {"type": "boolean"}},
+      "additionalProperties": false
+    },
+    "timing_ns": {
+      "type": "object",
+      "required": ["application_e2e", "cold_first_result", "program_time", "preparation", "pack", "h2d_wall", "h2d_device", "graph_device", "d2h_device", "d2h_wall", "graph_submit_wait_wall", "unpack_and_assembly", "unattributed_wall"],
+      "properties": {
+        "application_e2e": {"type": "integer", "minimum": 0},
+        "cold_first_result": {"$ref": "#/$defs/nullable_ns"},
+        "program_time": {"$ref": "#/$defs/nullable_ns"},
+        "preparation": {"type": "integer", "minimum": 0},
+        "pack": {"type": "integer", "minimum": 0},
+        "h2d_wall": {"type": "integer", "minimum": 0},
+        "h2d_device": {"$ref": "#/$defs/nullable_ns"},
+        "graph_device": {"$ref": "#/$defs/nullable_ns"},
+        "d2h_device": {"$ref": "#/$defs/nullable_ns"},
+        "d2h_wall": {"type": "integer", "minimum": 0},
+        "graph_submit_wait_wall": {"type": "integer", "minimum": 0},
+        "unpack_and_assembly": {"type": "integer", "minimum": 0},
+        "unattributed_wall": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "timing_unavailable_reasons": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "event_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "event_frontiers": {"type": "array", "items": {"type": "object"}},
+    "bytes": {
+      "type": "object",
+      "required": ["h2d", "d2h"],
+      "properties": {"h2d": {"type": "integer", "minimum": 0}, "d2h": {"type": "integer", "minimum": 0}},
+      "additionalProperties": false
+    },
+    "correctness_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "correctness_summary": {
+      "type": "object",
+      "required": ["verified_after_timing", "max_error", "rms_error", "mismatch_count"],
+      "properties": {
+        "verified_after_timing": {"type": "boolean"},
+        "max_error": {"type": "number", "minimum": 0},
+        "rms_error": {"type": "number", "minimum": 0},
+        "mismatch_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "status": {"enum": ["pass", "fail", "invalid_control"]},
+    "error": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
