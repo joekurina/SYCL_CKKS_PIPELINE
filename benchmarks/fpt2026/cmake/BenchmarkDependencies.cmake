@@ -34,6 +34,7 @@ set(MICROSOFT_SEAL_ROOT "" CACHE PATH "Pinned Microsoft SEAL source/install root
 set(MICROSOFT_SEAL_LIBRARY "" CACHE FILEPATH "Pinned Microsoft SEAL static archive")
 set(FPGA_REPORT_ROOT "" CACHE PATH "Pinned seed-7 report root")
 set(FPT2026_REUSE_EXE "" CACHE FILEPATH "Optional seed-7 anchor executable")
+set(FPT2026_FPGA_DEVICE "Agilex7" CACHE STRING "Exact FPGA target passed to the final hardware link")
 option(FPT2026_ALLOW_DIRTY_DIAGNOSTIC
        "Allow dirty dependency trees for non-paper diagnostic builds" OFF)
 
@@ -143,5 +144,5 @@ set_target_properties(microsoft_seal_imported PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${MICROSOFT_SEAL_INCLUDE_DIR}")
 
 set(FPT2026_ACCELERATOR_LINK_OPTIONS
-    "-fsycl;-std=c++17;-Rno-debug-disables-optimization;-DCSL_USE_GMP;-DCSL_SYCL;-Wno-return-type-c-linkage;-qactypes;-fintelfpga"
+    "-fsycl;-std=c++17;-Rno-debug-disables-optimization;-DCSL_USE_GMP;-DCSL_SYCL;-Wno-return-type-c-linkage;-qactypes;-fintelfpga;-Xshardware;-Xstarget=${FPT2026_FPGA_DEVICE};-DFPGA_HARDWARE;LINKER:--allow-multiple-definition"
     CACHE STRING "Pinned host-side accelerator final-link options")

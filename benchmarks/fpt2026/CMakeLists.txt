@@ -66,7 +66,8 @@ if(FPT2026_ENABLE_SOURCE_TEST_TARGETS)
             benchmark_vectors_test
             correctness_metrics_test
             result_writer_test
-            seal_ciphertext_bridge_test)
+            seal_ciphertext_bridge_test
+            seal_embedded_runner_test)
         add_executable(${test_name} "tests/${test_name}.cpp")
         target_link_libraries(${test_name} PRIVATE fpt2026_host)
     endforeach()

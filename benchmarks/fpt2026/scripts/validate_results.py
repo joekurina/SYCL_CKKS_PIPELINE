@@ -549,15 +549,18 @@ def validate_samples_events_correctness(
                 raise ContractError(f"sample {sample['sample_id']} has null {field} without reason")
         timing = sample["timing_ns"]
         additive_fields = ("h2d_wall", "graph_submit_wait_wall", "d2h_wall")
-        additive_available = sample["backend"] == "fpga" and sample["batch_size"] == 1
-        if additive_available:
+        additive_available = (
+            sample["backend"] == "fpga" and sample["batch_size"] == 1 and
+            sample["experiment_id"] in {"E2", "E6"}
+        )
+        if sample["backend"] == "fpga":
             if any(field in sample["timing_unavailable_reasons"] for field in additive_fields):
-                raise ContractError(f"sample {sample['sample_id']} suppresses an E2 additive wall region")
+                raise ContractError(f"sample {sample['sample_id']} suppresses an FPGA wall interval")
         else:
             for field in additive_fields:
                 if timing[field] != 0 or not sample["timing_unavailable_reasons"].get(field):
                     raise ContractError(
-                        f"sample {sample['sample_id']} must mark non-additive {field} unavailable"
+                        f"sample {sample['sample_id']} must mark CPU-only {field} unavailable"
                     )
         attributed_fields = ["preparation", "pack", "unpack_and_assembly", "unattributed_wall"]
         if additive_available:
@@ -627,8 +630,50 @@ def validate_samples_events_correctness(
     for row in correctness:
         if row["attempt_id"] not in started:
             raise ContractError(f"correctness row {row['correctness_record_id']} references unknown attempt")
+        finite_fields = (
+            "max_abs_error", "rms_error", "max_real_error", "max_imag_error",
+            "component_max_abs_error", "threshold", "pairwise_max_abs_error",
+            "pairwise_rms_error",
+        )
+        for field in finite_fields:
+            value = row[field]
+            if value is not None and (not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise ContractError(
+                    f"correctness row {row['correctness_record_id']} has nonfinite {field}"
+                )
         if row["passed"] is not True:
             raise ContractError(f"correctness row {row['correctness_record_id']} failed")
+        if row["mismatch_count"] != 0 or row["nonfinite_value_count"] != 0:
+            raise ContractError(
+                f"passing correctness row {row['correctness_record_id']} reports failures"
+            )
+        if row["transport_mismatch_count"] != 0 or row["transport_passed"] is not True:
+            raise ContractError(
+                f"passing correctness row {row['correctness_record_id']} failed C0 transport"
+            )
+        if row["transport_mismatch_count"] != (
+            row["noncanonical_residue_count"] + row["retained_c1_mismatch_count"]
+        ):
+            raise ContractError(
+                f"correctness row {row['correctness_record_id']} has inconsistent C0 counts"
+            )
+        if row["finite_value_count"] != row["compared_value_count"]:
+            raise ContractError(
+                f"passing correctness row {row['correctness_record_id']} has incomplete finite coverage"
+            )
+        if row["max_abs_error"] is None or row["max_abs_error"] > row["threshold"]:
+            raise ContractError(
+                f"passing correctness row {row['correctness_record_id']} exceeds its threshold"
+            )
+        if row["verification_kind"] == "decrypt_decode":
+            if row["requested_slot_count"] + row["inactive_slot_count"] != 4096:
+                raise ContractError(
+                    f"semantic row {row['correctness_record_id']} does not cover all CKKS slots"
+                )
+            if row["compared_value_count"] != 4096:
+                raise ContractError(
+                    f"semantic row {row['correctness_record_id']} has wrong comparison count"
+                )
 
     e1 = [row for row in correctness if row["experiment_id"] == "E1"]
     c1 = [row for row in e1 if row["check_id"] == "C1"]

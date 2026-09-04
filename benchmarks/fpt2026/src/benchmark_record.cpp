@@ -47,6 +47,11 @@ std::string finite_number_json(double value)
     return output.str();
 }
 
+std::string number_or_null_json(double value)
+{
+    return std::isfinite(value) ? finite_number_json(value) : "null";
+}
+
 std::string optional_number_json(const std::optional<double>& value)
 {
     return value ? finite_number_json(*value) : "null";
@@ -272,17 +277,14 @@ std::string timing_record_json(const TimingRecordInput& record)
         add_reason("pack", false, "not_applicable_to_cpu_backend");
     }
     add_reason(
-        "h2d_wall", record.timing.additive_wall_breakdown_available,
-        record.identity.backend == "fpga" ? "overlapped_batch_has_no_additive_wall_stage"
-                                           : "not_applicable_to_cpu_backend");
+        "h2d_wall", record.identity.backend == "fpga",
+        "not_applicable_to_cpu_backend");
     add_reason(
-        "graph_submit_wait_wall", record.timing.additive_wall_breakdown_available,
-        record.identity.backend == "fpga" ? "overlapped_batch_has_no_additive_wall_stage"
-                                           : "not_applicable_to_cpu_backend");
+        "graph_submit_wait_wall", record.identity.backend == "fpga",
+        "not_applicable_to_cpu_backend");
     add_reason(
-        "d2h_wall", record.timing.additive_wall_breakdown_available,
-        record.identity.backend == "fpga" ? "overlapped_batch_has_no_additive_wall_stage"
-                                           : "not_applicable_to_cpu_backend");
+        "d2h_wall", record.identity.backend == "fpga",
+        "not_applicable_to_cpu_backend");
 
     output << "},"
         << "\"event_record_ids\":" << string_array_json(record.event_record_ids) << ','
@@ -320,6 +322,10 @@ std::string correctness_record_json(const CorrectnessRecordInput& record)
         << "\"backend\":" << string_json(record.identity.backend) << ','
         << "\"case_id\":" << string_json(record.identity.case_id) << ','
         << "\"vector_descriptor_sha256\":" << string_json(record.vector_descriptor_sha256) << ','
+        << "\"trial_seed_digest\":" << string_json(record.trial_seed_digest) << ','
+        << "\"benchmark_key_pair_id\":" << string_json(record.benchmark_key_pair_id) << ','
+        << "\"oracle_id\":" << string_json(record.oracle_id) << ','
+        << "\"verified_utc\":" << string_json(record.verified_utc) << ','
         << "\"trial_seed_index\":" << record.identity.trial_seed_index << ','
         << "\"frame_index\":" << record.frame_index << ','
         << "\"check_id\":" << string_json(record.check_id) << ','
@@ -329,10 +335,26 @@ std::string correctness_record_json(const CorrectnessRecordInput& record)
         << "\"requested_slot_count\":" << metrics.requested_slot_count << ','
         << "\"inactive_slot_count\":" << metrics.inactive_slot_count << ','
         << "\"compared_value_count\":" << metrics.compared_value_count << ','
-        << "\"max_abs_error\":" << finite_number_json(metrics.max_abs_error) << ','
-        << "\"rms_error\":" << finite_number_json(metrics.rms_error) << ','
-        << "\"component_max_abs_error\":" << finite_number_json(metrics.component_max_abs_error) << ','
+        << "\"finite_value_count\":" << metrics.finite_value_count << ','
+        << "\"nonfinite_value_count\":" << metrics.nonfinite_value_count << ','
+        << "\"max_abs_error\":" << number_or_null_json(metrics.max_abs_error) << ','
+        << "\"rms_error\":" << number_or_null_json(metrics.rms_error) << ','
+        << "\"max_real_error\":" << number_or_null_json(metrics.max_real_error) << ','
+        << "\"max_imag_error\":" << number_or_null_json(metrics.max_imag_error) << ','
+        << "\"component_max_abs_error\":" << number_or_null_json(metrics.component_max_abs_error) << ','
         << "\"mismatch_count\":" << metrics.mismatch_count << ','
+        << "\"worst_index\":" << metrics.worst_index << ','
+        << "\"worst_expected\":[" << number_or_null_json(metrics.worst_expected.real())
+        << ',' << number_or_null_json(metrics.worst_expected.imag()) << "],"
+        << "\"worst_actual\":[" << number_or_null_json(metrics.worst_actual.real())
+        << ',' << number_or_null_json(metrics.worst_actual.imag()) << "],"
+        << "\"failure_reason\":"
+        << (metrics.failure_reason.empty() ? "null" : string_json(metrics.failure_reason)) << ','
+        << "\"transport_mismatch_count\":" << record.transport_metrics.mismatch_count << ','
+        << "\"noncanonical_residue_count\":" << record.transport_metrics.noncanonical_count << ','
+        << "\"retained_c1_mismatch_count\":"
+        << record.transport_metrics.retained_c1_mismatch_count << ','
+        << "\"transport_passed\":" << bool_json(record.transport_metrics.passed) << ','
         << "\"threshold\":" << finite_number_json(metrics.threshold) << ','
         << "\"paired_reference_correctness_record_id\":"
         << optional_string_json(record.paired_reference_correctness_record_id) << ','

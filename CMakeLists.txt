@@ -320,6 +320,7 @@ endif()
 if(SYCL_CKKS_BUILD_BENCHMARK_SOURCE_FPGA_TESTS)
     enable_language(C)
     include(CTest)
+    find_package(Threads REQUIRED)
     target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE SYCL_CKKS_BENCHMARK_PRIVATE_TEST=1)
 
     function(add_sycl_ckks_benchmark_source_fpga_test target source)
@@ -348,6 +349,7 @@ if(SYCL_CKKS_BUILD_BENCHMARK_SOURCE_FPGA_TESTS)
         sycl_ckks_benchmark_lifecycle_fpga_test
         tests/benchmark/benchmark_lifecycle_fpga_test.cpp)
     target_compile_features(sycl_ckks_benchmark_lifecycle_fpga_test PRIVATE cxx_std_17)
+    target_link_libraries(sycl_ckks_benchmark_lifecycle_fpga_test PRIVATE Threads::Threads)
 
     add_sycl_ckks_benchmark_source_fpga_test(
         sycl_ckks_benchmark_public_lifecycle_fpga_test

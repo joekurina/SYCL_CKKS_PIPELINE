@@ -1199,6 +1199,7 @@ static int benchmark_encrypt_batch_impl(
         const BenchmarkClock::time_point pack_end = BenchmarkClock::now();
         timing->pack_wall_ns = elapsed_ns(pack_start, pack_end);
 
+        const BenchmarkClock::time_point h2d_interval_start = BenchmarkClock::now();
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             submitted[frame_index].h2d =
                 copy_batch_to_device(runtime.q, *runtime.frames[frame_index]);
@@ -1232,6 +1233,7 @@ static int benchmark_encrypt_batch_impl(
                 elapsed_ns(graph_start, BenchmarkClock::now());
         }
 
+        const BenchmarkClock::time_point d2h_interval_start = BenchmarkClock::now();
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             copy_batch_to_host(
                 runtime,
@@ -1239,6 +1241,27 @@ static int benchmark_encrypt_batch_impl(
                 submitted[frame_index]);
         }
         const BenchmarkClock::time_point d2h_wait_start = BenchmarkClock::now();
+
+        if (frame_count > 1) {
+            for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+                submitted[frame_index].h2d.wait_and_throw();
+            }
+            timing->h2d_wall_ns =
+                elapsed_ns(h2d_interval_start, BenchmarkClock::now());
+            for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
+                for (size_t p = 0; p < NUM_MODULI; ++p) {
+                    submitted[frame_index].exit_c0[p].wait_and_throw();
+                    if (runtime.config.save_ntt_s) {
+                        submitted[frame_index].exit_ntt_s[p].wait_and_throw();
+                    }
+                    if (runtime.config.save_ntt_pte) {
+                        submitted[frame_index].exit_ntt_pte[p].wait_and_throw();
+                    }
+                }
+            }
+            timing->graph_submit_wait_wall_ns =
+                elapsed_ns(graph_start, BenchmarkClock::now());
+        }
 
         // For B>1 the complete batch is submitted before any wait. B=1 uses
         // disjoint synchronous waits above for the additive E2 wall breakdown.
@@ -1256,6 +1279,9 @@ static int benchmark_encrypt_batch_impl(
         if (frame_count == 1) {
             timing->d2h_wall_ns = elapsed_ns(d2h_wait_start, BenchmarkClock::now());
             timing->additive_wall_breakdown_available = 1;
+        } else {
+            timing->d2h_wall_ns =
+                elapsed_ns(d2h_interval_start, BenchmarkClock::now());
         }
 
         const BenchmarkClock::time_point unpack_start = BenchmarkClock::now();

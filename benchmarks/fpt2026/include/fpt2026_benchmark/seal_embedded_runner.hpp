@@ -56,12 +56,20 @@ struct ResidueBatch {
     std::array<std::vector<std::uint32_t>, kDataModulusCount> c1;
 };
 
+struct TransportMetrics {
+    std::size_t noncanonical_count{};
+    std::size_t retained_c1_mismatch_count{};
+    std::size_t mismatch_count{};
+    bool passed{true};
+};
+
 struct BackendBatchResult {
     TimingBreakdown timing;
     ResidueBatch residues;
     std::vector<seal::Ciphertext> ciphertexts;
     std::vector<std::vector<std::complex<double>>> decoded_slots;
     std::vector<NumericalMetrics> correctness;
+    std::vector<TransportMetrics> transport_correctness;
     std::vector<std::string> trial_seed_digests;
     bool passed{};
 };

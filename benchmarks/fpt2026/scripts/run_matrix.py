@@ -164,15 +164,24 @@ def _authorize(
         components.append(path)
         component_hashes.append(sha256_file(path))
     declared_components = snapshot.get("component_sha256s")
-    if not isinstance(declared_components, list) or not all(
-        digest in declared_components for digest in component_hashes
-    ):
-        raise ContractError(f"{phase} effective plan does not hash every referenced component")
+    if declared_components != component_hashes:
+        raise ContractError(f"{phase} effective plan does not hash the exact ordered components")
     planned_ids = [unit["planned_unit_id"] for unit in units]
     if snapshot.get("planned_unit_ids") != planned_ids:
         raise ContractError(f"{phase} effective plan does not authorize the exact ordered units")
     if len(set(planned_ids)) != len(planned_ids):
         raise ContractError(f"{phase} effective plan repeats a planned-unit ID")
+    observed_counts = {
+        "attempts": sum(int(unit["child_attempts"]) for unit in units),
+        "attempt_rows": 2 * sum(int(unit["child_attempts"]) for unit in units),
+        "control_snapshots": 2 * sum(int(unit["child_attempts"]) for unit in units),
+        "frames": sum(int(unit["frames"]) for unit in units),
+        "event_rows": sum(int(unit["event_rows"]) for unit in units),
+        "correctness_rows": sum(int(unit["correctness_rows"]) for unit in units),
+        "timing_rows": sum(int(unit["timing_rows"]) for unit in units),
+    }
+    if snapshot.get("declared_counts") != observed_counts:
+        raise ContractError(f"{phase} effective plan declared counts do not match its units")
     return Authorization(
         phase=phase,
         snapshot_path=snapshot_path,

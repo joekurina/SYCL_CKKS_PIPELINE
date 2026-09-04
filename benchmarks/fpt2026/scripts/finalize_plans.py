@@ -175,8 +175,8 @@ def finalize_e4(manifest: dict[str, Any], evidence_path: Path) -> None:
     components = [
         manifest["base_plan_sha256"],
         sha256_file(require_absolute(paths["planned_units_e8_extension"])),
-        sha256_file(e8_amendment_path),
         sustained_sha256,
+        sha256_file(e8_amendment_path),
         amendment_sha256,
     ]
     effective = snapshot("base+e8+e4", e8_snapshot_sha256, components, all_units)

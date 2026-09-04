@@ -241,22 +241,37 @@ AcceleratorBatchResult AcceleratorRunner::encrypt(
     // All transport, retained-c1, and semantic checks happen after copyback and
     // after the measured application boundary.
     result.passed = true;
+    result.transport_correctness.resize(frames.size());
     for (std::size_t frame = 0; frame < frames.size(); ++frame) {
+        auto& transport = result.transport_correctness[frame];
         for (std::size_t p = 0; p < kDataModulusCount; ++p) {
             const std::size_t base = frame * kPolyModulusDegree;
             for (std::size_t i = 0; i < kPolyModulusDegree; ++i) {
                 const std::uint32_t c0 = result.residues.c0[p][base + i];
                 const std::uint32_t c1 = result.residues.c1[p][base + i];
-                if (c0 >= kDataModuli[p] || c1 >= kDataModuli[p] ||
-                    c1 != inputs.uniform_polys[p][base + i]) {
-                    result.passed = false;
+                if (c0 >= kDataModuli[p]) {
+                    ++transport.noncanonical_count;
+                }
+                if (c1 >= kDataModuli[p]) {
+                    ++transport.noncanonical_count;
+                }
+                if (c1 != inputs.uniform_polys[p][base + i]) {
+                    ++transport.retained_c1_mismatch_count;
                 }
             }
         }
+        transport.mismatch_count =
+            transport.noncanonical_count + transport.retained_c1_mismatch_count;
+        transport.passed = transport.mismatch_count == 0;
         auto decoded = oracle_->decrypt_decode(result.ciphertexts[frame]);
         auto metrics = evaluate_slots(
             frames[frame].slots, decoded, frames[frame].active_slots,
             kCorrectnessThreshold);
+        if (!transport.passed) {
+            metrics.mismatch_count += transport.mismatch_count;
+            metrics.passed = false;
+            metrics.failure_reason = "C0 structural or transport verification failed";
+        }
         result.passed = result.passed && metrics.passed;
         result.decoded_slots.push_back(std::move(decoded));
         result.correctness.push_back(std::move(metrics));

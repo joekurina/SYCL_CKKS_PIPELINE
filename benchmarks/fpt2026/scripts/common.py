@@ -21,7 +21,13 @@ def utc_now() -> str:
 
 
 def canonical_json_bytes(value: Any) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+    return (json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ) + "\n").encode("utf-8")
+
+
+def _reject_nonfinite_constant(value: str) -> None:
+    raise ContractError(f"nonstandard nonfinite JSON constant is forbidden: {value}")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -62,7 +68,7 @@ def require_absolute(path: Path | str, label: str = "path") -> Path:
 def load_json(path: Path | str) -> Any:
     source = Path(path)
     with source.open("r", encoding="utf-8") as stream:
-        return json.load(stream)
+        return json.load(stream, parse_constant=_reject_nonfinite_constant)
 
 
 def read_jsonl(path: Path | str) -> list[dict[str, Any]]:
@@ -73,7 +79,7 @@ def read_jsonl(path: Path | str) -> list[dict[str, Any]]:
             if not line.strip():
                 raise ContractError(f"blank JSONL row at {source}:{line_number}")
             try:
-                record = json.loads(line)
+                record = json.loads(line, parse_constant=_reject_nonfinite_constant)
             except json.JSONDecodeError as exc:
                 raise ContractError(f"invalid JSON at {source}:{line_number}: {exc}") from exc
             if not isinstance(record, dict):

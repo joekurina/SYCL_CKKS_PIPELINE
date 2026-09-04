@@ -376,8 +376,18 @@ void emit_batch(
             record.sample_id = sample_id;
         }
         record.vector_descriptor_sha256 = vector_digests.back();
+        record.trial_seed_digest = result.trial_seed_digests[frame];
+        record.benchmark_key_pair_id = options.benchmark_key_pair_id;
+        record.oracle_id = "stock-seal-decrypt-decode-v1";
+        record.verified_utc = utc_now_iso8601();
         record.frame_index = frame_base + frame;
         record.metrics = result.correctness[frame];
+        if (!result.transport_correctness.empty()) {
+            if (result.transport_correctness.size() != frames.size()) {
+                throw std::runtime_error("transport correctness count does not match frames");
+            }
+            record.transport_metrics = result.transport_correctness[frame];
+        }
         append_jsonl_durable(
             options.output / "correctness.jsonl",
             correctness_record_json(record));
@@ -447,6 +457,14 @@ void emit_batch(
     sample.frame_count_submitted = frames.size();
     sample.frame_count_completed = result.correctness.size();
     sample.timing = result.timing;
+    const bool publish_additive_wall =
+        sample.timing.additive_wall_breakdown_available &&
+        (options.experiment_id == "E2" || options.experiment_id == "E6");
+    if (sample.timing.additive_wall_breakdown_available && !publish_additive_wall) {
+        sample.timing.unattributed_wall_ns += sample.timing.h2d_wall_ns +
+            sample.timing.graph_submit_wait_wall_ns + sample.timing.d2h_wall_ns;
+        sample.timing.additive_wall_breakdown_available = false;
+    }
     sample.cold_first_result_ns = cold_first_result_ns;
     sample.h2d_bytes = h2d_bytes;
     sample.d2h_bytes = d2h_bytes;

@@ -72,8 +72,13 @@ struct CorrectnessRecordInput {
     std::string check_id;
     std::optional<std::string> sample_id;
     std::string vector_descriptor_sha256;
+    std::string trial_seed_digest;
+    std::string benchmark_key_pair_id;
+    std::string oracle_id;
+    std::string verified_utc;
     std::size_t frame_index{};
     NumericalMetrics metrics;
+    TransportMetrics transport_metrics;
     std::optional<std::string> paired_reference_correctness_record_id;
     std::optional<double> pairwise_max_abs_error;
     std::optional<double> pairwise_rms_error;

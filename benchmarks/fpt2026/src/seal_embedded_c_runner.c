@@ -73,14 +73,13 @@ static int validate_state(
     return FPT2026_SE_OK;
 }
 
-static int verify_compact_key(
+static int load_compact_key(
     const char *path,
-    const ZZ *loaded_key,
+    ZZ *loaded_key,
     char *message,
     size_t capacity)
 {
     const size_t key_bytes = FPT2026_SEAL_EMBEDDED_DEGREE / 4u;
-    unsigned char expected[FPT2026_SEAL_EMBEDDED_DEGREE / 4u];
     FILE *stream;
     int trailing;
 
@@ -93,7 +92,8 @@ static int verify_compact_key(
         return set_error(FPT2026_SE_SETUP_ERROR, message, capacity,
                          "cannot open compact benchmark key");
     }
-    if (fread(expected, 1u, key_bytes, stream) != key_bytes) {
+    memset(loaded_key, 0, FPT2026_SEAL_EMBEDDED_DEGREE * sizeof(*loaded_key));
+    if (fread((unsigned char *)loaded_key, 1u, key_bytes, stream) != key_bytes) {
         fclose(stream);
         return set_error(FPT2026_SE_SETUP_ERROR, message, capacity,
                          "compact benchmark key has the wrong size");
@@ -103,10 +103,6 @@ static int verify_compact_key(
     if (trailing != EOF) {
         return set_error(FPT2026_SE_SETUP_ERROR, message, capacity,
                          "compact benchmark key has trailing bytes");
-    }
-    if (memcmp(expected, (const unsigned char *)loaded_key, key_bytes) != 0) {
-        return set_error(FPT2026_SE_KEY_MISMATCH, message, capacity,
-                         "SEAL-Embedded loaded key differs from the requested compact key");
     }
     return FPT2026_SE_OK;
 }
@@ -118,6 +114,7 @@ int fpt2026_seal_embedded_create(
     size_t error_message_capacity)
 {
     FPT2026SealEmbeddedState *created;
+    uint8_t setup_seed[SE_PRNG_SEED_BYTE_COUNT] = {0};
     size_t p;
     int status;
 
@@ -165,10 +162,15 @@ int fpt2026_seal_embedded_create(
                              error_message_capacity, "SEAL-Embedded modulus contract mismatch");
         }
     }
-    ckks_setup_s(&created->parms, NULL, &created->error_prng,
+    /* Exercise the stock public setup path without its hidden SE_DATA_PATH file
+       dependency, then replace the sampled packed key with the explicit pinned
+       compact key that controls every benchmark operation. */
+    created->parms.sample_s = true;
+    ckks_setup_s(&created->parms, setup_seed, &created->error_prng,
                  created->ptrs.ternary);
-    status = verify_compact_key(config->compact_key_path, created->ptrs.ternary,
-                                error_message, error_message_capacity);
+    created->parms.sample_s = false;
+    status = load_compact_key(config->compact_key_path, created->ptrs.ternary,
+                              error_message, error_message_capacity);
     if (status != FPT2026_SE_OK) {
         fpt2026_seal_embedded_destroy(created);
         return status;
@@ -311,13 +313,25 @@ int fpt2026_seal_embedded_prepare_accelerator_inputs(
 {
     size_t frame;
     size_t p;
-    const size_t frame_coefficients = frame_count * FPT2026_SEAL_EMBEDDED_DEGREE;
-    const size_t modulus_coefficients = FPT2026_SEAL_EMBEDDED_MODULI * frame_coefficients;
+    size_t frame_coefficients;
+    size_t modulus_coefficients;
     int status = validate_state(state, error_message, error_message_capacity);
     if (status != FPT2026_SE_OK) {
         return status;
     }
-    if (frame_count == 0 || shareable_seeds == NULL || error_seeds == NULL ||
+    if (frame_count == 0 ||
+        frame_count > SIZE_MAX / FPT2026_SEAL_EMBEDDED_DEGREE ||
+        frame_count > SIZE_MAX / FPT2026_SEAL_EMBEDDED_SEED_BYTES) {
+        return set_error(FPT2026_SE_INVALID_ARGUMENT, error_message,
+                         error_message_capacity, "accelerator-preparation size overflow");
+    }
+    frame_coefficients = frame_count * FPT2026_SEAL_EMBEDDED_DEGREE;
+    if (frame_coefficients > SIZE_MAX / FPT2026_SEAL_EMBEDDED_MODULI) {
+        return set_error(FPT2026_SE_INVALID_ARGUMENT, error_message,
+                         error_message_capacity, "accelerator-preparation modulus size overflow");
+    }
+    modulus_coefficients = FPT2026_SEAL_EMBEDDED_MODULI * frame_coefficients;
+    if (shareable_seeds == NULL || error_seeds == NULL ||
         shareable_seed_bytes < frame_count * FPT2026_SEAL_EMBEDDED_SEED_BYTES ||
         error_seed_bytes < frame_count * FPT2026_SEAL_EMBEDDED_SEED_BYTES ||
         error_samples == NULL || error_capacity < frame_coefficients ||
