@@ -682,16 +682,59 @@ def validate_samples_events_correctness(
         raise ContractError("E5 paired-reference links are not one-to-one")
 
 
-def validate_statuses(records: list[dict[str, Any]], effective_sha256: str) -> None:
-    require_unique(records, "experiment_id", "experiment-status experiment")
-    if {row["experiment_id"] for row in records} != {f"E{index}" for index in range(1, 9)}:
+def validate_statuses(
+    statuses: list[dict[str, Any]],
+    effective_sha256: str,
+    units: list[dict[str, Any]],
+    raw: dict[str, list[dict[str, Any]]],
+) -> None:
+    require_unique(statuses, "experiment_id", "experiment-status experiment")
+    if {row["experiment_id"] for row in statuses} != {f"E{index}" for index in range(1, 9)}:
         raise ContractError("experiment-status rows are not exactly E1 through E8")
-    for row in records:
+    for row in statuses:
         if row["status"] != "pass":
             raise ContractError(f"{row['experiment_id']} terminal status is not pass")
         if row["effective_plan_sha256"] != effective_sha256:
             raise ContractError(f"{row['experiment_id']} cites the wrong effective plan")
-    e3 = next(row for row in records if row["experiment_id"] == "E3")
+        experiment_id = row["experiment_id"]
+        experiment_units = [unit for unit in units if unit["experiment_id"] == experiment_id]
+        expected = {
+            "attempts": sum(int(unit["child_attempts"]) for unit in experiment_units),
+            "samples": sum(int(unit["timing_rows"]) for unit in experiment_units),
+            "frames": sum(int(unit["frames"]) for unit in experiment_units),
+            "events": sum(int(unit["event_rows"]) for unit in experiment_units),
+            "correctness": sum(int(unit["correctness_rows"]) for unit in experiment_units),
+        }
+        finished_attempts = {
+            item["attempt_id"] for item in raw["attempts"]
+            if item.get("experiment_id") == experiment_id and
+            item.get("record_type") == "attempt_finished"
+        }
+        experiment_events = [
+            item for item in raw["events"] if item.get("experiment_id") == experiment_id
+        ]
+        experiment_correctness = [
+            item for item in raw["correctness"] if item.get("experiment_id") == experiment_id
+        ]
+        frame_keys = {
+            (item["attempt_id"], item["frame_index"])
+            for item in (experiment_events or experiment_correctness)
+        }
+        observed = {
+            "attempts": len(finished_attempts),
+            "samples": sum(
+                item.get("experiment_id") == experiment_id for item in raw["samples"]
+            ),
+            "frames": len(frame_keys),
+            "events": len(experiment_events),
+            "correctness": len(experiment_correctness),
+        }
+        if observed != expected or row["validated_counts"] != observed:
+            raise ContractError(
+                f"{experiment_id} status counts do not close: "
+                f"expected {expected}, observed {observed}, declared {row['validated_counts']}"
+            )
+    e3 = next(row for row in statuses if row["experiment_id"] == "E3")
     report_hashes = {
         e3["report_evidence"]["report_tree_sha256"],
         e3["report_evidence"]["info_ndjson_sha256"],
@@ -700,7 +743,7 @@ def validate_statuses(records: list[dict[str, Any]], effective_sha256: str) -> N
     }
     if not report_hashes.issubset(set(e3["evidence_sha256s"])):
         raise ContractError("E3 detailed report hashes are absent from evidence_sha256s")
-    e7 = next(row for row in records if row["experiment_id"] == "E7")
+    e7 = next(row for row in statuses if row["experiment_id"] == "E7")
     if not e7.get("source_evidence"):
         raise ContractError("E7 status lacks source_evidence")
     child_output_path = require_absolute(e7["child_output_path"], "E7 child output")
@@ -763,7 +806,9 @@ def main() -> int:
     validate_samples_events_correctness(
         records, started, unit_by_id, final_counts, manifest["parameters"]
     )
-    validate_statuses(records["experiment_status"], final_effective_sha256)
+    validate_statuses(
+        records["experiment_status"], final_effective_sha256, all_units, records
+    )
     print(
         f"PASS: {len(all_units)} planned units, {final_counts['attempts']} attempts, "
         f"{final_counts['frames']} frames, {final_counts['event_rows']} events, "

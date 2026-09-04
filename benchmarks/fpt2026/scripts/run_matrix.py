@@ -911,6 +911,72 @@ def _append_extraction_statuses(
         existing_ids.add(experiment_id)
 
 
+def _append_data_statuses(
+    manifest: dict[str, Any], authorization: Authorization, final_effective_sha256: str
+) -> None:
+    status_path = require_absolute(manifest["paths"]["experiment_status"], "experiment status")
+    existing = read_jsonl(status_path) if status_path.exists() else []
+    existing_ids = {row.get("experiment_id") for row in existing}
+    attempts = read_jsonl(require_absolute(manifest["paths"]["attempts"], "attempts"))
+    samples = read_jsonl(require_absolute(manifest["paths"]["samples"], "samples"))
+    events = read_jsonl(require_absolute(manifest["paths"]["events"], "events"))
+    correctness = read_jsonl(require_absolute(manifest["paths"]["correctness"], "correctness"))
+    evidence_paths = [
+        require_absolute(manifest["paths"][key], key)
+        for key in ("attempts", "controls", "samples", "events", "correctness")
+    ]
+    evidence_sha256s = list(dict.fromkeys(sha256_file(path) for path in evidence_paths))
+
+    for experiment_id in ("E1", "E2", "E4", "E5", "E6", "E8"):
+        if experiment_id in existing_ids:
+            raise ContractError(f"data-owned {experiment_id} status already exists")
+        units = [unit for unit in authorization.units if unit["experiment_id"] == experiment_id]
+        planned = {
+            "attempts": sum(int(unit["child_attempts"]) for unit in units),
+            "samples": sum(int(unit["timing_rows"]) for unit in units),
+            "frames": sum(int(unit["frames"]) for unit in units),
+            "events": sum(int(unit["event_rows"]) for unit in units),
+            "correctness": sum(int(unit["correctness_rows"]) for unit in units),
+        }
+        experiment_attempts = {
+            row["attempt_id"] for row in attempts
+            if row.get("experiment_id") == experiment_id and row.get("record_type") == "attempt_finished"
+        }
+        experiment_samples = [row for row in samples if row.get("experiment_id") == experiment_id]
+        experiment_events = [row for row in events if row.get("experiment_id") == experiment_id]
+        experiment_correctness = [
+            row for row in correctness if row.get("experiment_id") == experiment_id
+        ]
+        frame_keys = {
+            (row["attempt_id"], row["frame_index"])
+            for row in (experiment_events or experiment_correctness)
+        }
+        observed = {
+            "attempts": len(experiment_attempts),
+            "samples": len(experiment_samples),
+            "frames": len(frame_keys),
+            "events": len(experiment_events),
+            "correctness": len(experiment_correctness),
+        }
+        if observed != planned:
+            raise ContractError(
+                f"{experiment_id} cannot receive pass status: expected {planned}, observed {observed}"
+            )
+        append_jsonl(status_path, {
+            "schema_version": "1.0",
+            "record_type": "experiment_status",
+            "run_id": manifest["run_id"],
+            "experiment_id": experiment_id,
+            "status": "pass",
+            "effective_plan_sha256": final_effective_sha256,
+            "validated_counts": observed,
+            "evidence_sha256s": evidence_sha256s,
+            "reason": None,
+            "finished_utc": utc_now(),
+        })
+        existing_ids.add(experiment_id)
+
+
 def main() -> int:
     args = parse_args()
     manifest_path = require_absolute(args.manifest.resolve(), "manifest")
@@ -977,6 +1043,7 @@ def main() -> int:
         require_absolute(manifest["paths"]["effective_plan_e4"], "final effective plan")
     )
     _append_extraction_statuses(manifest, extraction_results, final_effective_sha256)
+    _append_data_statuses(manifest, e4_authorization, final_effective_sha256)
     return 0
 
 
