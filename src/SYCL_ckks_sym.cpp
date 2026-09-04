@@ -216,6 +216,9 @@ namespace {
 constexpr size_t BENCHMARK_BASE_EVENTS_PER_FRAME = 27;
 constexpr size_t BENCHMARK_SAVE_EVENTS_PER_FRAME = 12;
 constexpr uint64_t BENCHMARK_SESSION_MAGIC = UINT64_C(0x5359434c42454e43);
+constexpr std::array<uint32_t, NUM_MODULI> BENCHMARK_MODULI = {
+    1053818881u, 1054015489u, 1054212097u,
+    1055260673u, 1056178177u, 1056440321u};
 
 using BenchmarkClock = std::chrono::steady_clock;
 
@@ -331,8 +334,15 @@ static int validate_benchmark_config(
     required_capacity = config->max_frames * events_per_frame;
 
     for (size_t p = 0; p < NUM_MODULI; ++p) {
+        if (mod_values[p] != BENCHMARK_MODULI[p]) {
+            return benchmark_error(
+                SYCL_BENCHMARK_STATUS_INVALID_ARGUMENT,
+                error_message,
+                error_message_capacity,
+                "benchmark moduli must contain the exact ordered six-prime 8K chain");
+        }
         uint8_t selector = get_modulus_selector(mod_values[p]);
-        if (selector == 0xff) {
+        if (selector == 0xff || selector != p) {
             return benchmark_error(
                 SYCL_BENCHMARK_STATUS_INVALID_ARGUMENT,
                 error_message,
@@ -832,6 +842,8 @@ static void initialize_timing(SYCLBenchmarkTiming& timing)
     timing.h2d_profiling_available = 0;
     timing.graph_profiling_available = 0;
     timing.d2h_profiling_available = 0;
+    timing.additive_wall_breakdown_available = 0;
+    timing.graph_submit_wait_wall_ns = 0;
 }
 
 static void aggregate_timing_from_records(
@@ -1136,6 +1148,7 @@ static int benchmark_encrypt_batch_impl(
     char* error_message,
     size_t error_message_capacity)
 {
+    const BenchmarkClock::time_point api_start = BenchmarkClock::now();
     set_error_text(error_message, error_message_capacity, "");
     if (!session || session->magic != BENCHMARK_SESSION_MAGIC) {
         return benchmark_error(SYCL_BENCHMARK_STATUS_INVALID_ARGUMENT, error_message, error_message_capacity, "benchmark session is invalid");
@@ -1166,7 +1179,6 @@ static int benchmark_encrypt_batch_impl(
     }
 
     initialize_timing(*timing);
-    const BenchmarkClock::time_point api_start = BenchmarkClock::now();
     try {
         BenchmarkSessionRuntime& runtime = *session->runtime;
         std::vector<SubmittedFrameEvents> submitted(frame_count);
@@ -1187,12 +1199,18 @@ static int benchmark_encrypt_batch_impl(
         const BenchmarkClock::time_point pack_end = BenchmarkClock::now();
         timing->pack_wall_ns = elapsed_ns(pack_start, pack_end);
 
-        const BenchmarkClock::time_point h2d_start = BenchmarkClock::now();
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             submitted[frame_index].h2d =
                 copy_batch_to_device(runtime.q, *runtime.frames[frame_index]);
         }
 
+        if (frame_count == 1) {
+            const BenchmarkClock::time_point h2d_wait_start = BenchmarkClock::now();
+            submitted[0].h2d.wait_and_throw();
+            timing->h2d_wall_ns = elapsed_ns(h2d_wait_start, BenchmarkClock::now());
+        }
+
+        const BenchmarkClock::time_point graph_start = BenchmarkClock::now();
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             SubmittedFrameEvents bounded =
                 submit_one_bounded_frame(runtime, *runtime.frames[frame_index]);
@@ -1200,22 +1218,30 @@ static int benchmark_encrypt_batch_impl(
             submitted[frame_index] = std::move(bounded);
         }
 
-        const BenchmarkClock::time_point d2h_start = BenchmarkClock::now();
+        if (frame_count == 1) {
+            for (size_t p = 0; p < NUM_MODULI; ++p) {
+                submitted[0].exit_c0[p].wait_and_throw();
+                if (runtime.config.save_ntt_s) {
+                    submitted[0].exit_ntt_s[p].wait_and_throw();
+                }
+                if (runtime.config.save_ntt_pte) {
+                    submitted[0].exit_ntt_pte[p].wait_and_throw();
+                }
+            }
+            timing->graph_submit_wait_wall_ns =
+                elapsed_ns(graph_start, BenchmarkClock::now());
+        }
+
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             copy_batch_to_host(
                 runtime,
                 *runtime.frames[frame_index],
                 submitted[frame_index]);
         }
+        const BenchmarkClock::time_point d2h_wait_start = BenchmarkClock::now();
 
-        // The complete batch is submitted before any wait. Wait only on copy
-        // events; no service event or queue-wide wait is ever used.
-        for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
-            submitted[frame_index].h2d.wait_and_throw();
-        }
-        const BenchmarkClock::time_point h2d_end = BenchmarkClock::now();
-        timing->h2d_wall_ns = elapsed_ns(h2d_start, h2d_end);
-
+        // For B>1 the complete batch is submitted before any wait. B=1 uses
+        // disjoint synchronous waits above for the additive E2 wall breakdown.
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             for (size_t p = 0; p < NUM_MODULI; ++p) {
                 submitted[frame_index].d2h_c0[p].wait_and_throw();
@@ -1227,8 +1253,10 @@ static int benchmark_encrypt_batch_impl(
                 }
             }
         }
-        const BenchmarkClock::time_point d2h_end = BenchmarkClock::now();
-        timing->d2h_wall_ns = elapsed_ns(d2h_start, d2h_end);
+        if (frame_count == 1) {
+            timing->d2h_wall_ns = elapsed_ns(d2h_wait_start, BenchmarkClock::now());
+            timing->additive_wall_breakdown_available = 1;
+        }
 
         const BenchmarkClock::time_point unpack_start = BenchmarkClock::now();
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
@@ -1259,6 +1287,7 @@ static int benchmark_encrypt_batch_impl(
         }
         const BenchmarkClock::time_point unpack_end = BenchmarkClock::now();
         timing->unpack_wall_ns = elapsed_ns(unpack_start, unpack_end);
+        timing->accelerator_api_wall_ns = elapsed_ns(api_start, unpack_end);
 
         for (size_t frame_index = 0; frame_index < frame_count; ++frame_index) {
             append_named_frame_events(
@@ -1276,7 +1305,6 @@ static int benchmark_encrypt_batch_impl(
             event_records);
         aggregate_timing_from_records(event_records, required_records, *timing);
         *event_records_written = required_records;
-        timing->accelerator_api_wall_ns = elapsed_ns(api_start, BenchmarkClock::now());
         return SYCL_BENCHMARK_STATUS_SUCCESS;
     } catch (const std::exception& exception) {
         mark_session_failed(*session);

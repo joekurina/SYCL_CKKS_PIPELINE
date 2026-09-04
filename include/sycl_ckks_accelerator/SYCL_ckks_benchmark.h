@@ -49,6 +49,8 @@ typedef struct SYCLBenchmarkTiming {
     uint32_t h2d_profiling_available;
     uint32_t graph_profiling_available;
     uint32_t d2h_profiling_available;
+    uint32_t additive_wall_breakdown_available;
+    uint64_t graph_submit_wait_wall_ns;
 } SYCLBenchmarkTiming;
 
 /* Open enums: unknown values must not be treated as exhaustive by callers. */
@@ -125,8 +127,10 @@ int SYCL_benchmark_session_create(
  * with this ABI version and its structure size. Capacity failure and all other
  * argument/ABI failures occur before any batch command is submitted. Exactly
  * frame_count * (27 + 12 * save_ntt_s + 12 * save_ntt_pte) records are emitted.
- * Wall copy intervals run from first copy submission to collective completion;
- * because the queue is out-of-order, wall intervals can overlap other regions.
+ * For frame_count==1, the additive wall-breakdown flag is true and pack,
+ * H2D-wait, graph-submit/wait, D2H-wait, and unpack are disjoint synchronous
+ * regions. For larger batches it is false; use the event/device intervals and
+ * accelerator_api_wall_ns rather than summing overlapping stages.
  */
 int SYCL_benchmark_encrypt_batch(
     SYCLBenchmarkSession *session,
