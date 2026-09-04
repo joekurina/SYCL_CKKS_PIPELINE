@@ -225,7 +225,12 @@ def latency_summary_rows(
         valid = [row for row in rows if _valid_sample(row)]
         reliability = _reliability(rows, finished_by_attempt)
         for timing_field in TIMING_FIELDS:
-            values = [float(row["timing_ns"][timing_field]) for row in valid if row["timing_ns"].get(timing_field) is not None]
+            values = [
+                float(row["timing_ns"][timing_field])
+                for row in valid
+                if row["timing_ns"].get(timing_field) is not None
+                and timing_field not in row.get("timing_unavailable_reasons", {})
+            ]
             if not values:
                 continue
             identity = _group_dict(key)

@@ -243,16 +243,35 @@ def _driver_path(manifest: dict[str, Any]) -> Path:
     return path
 
 
-def _common_driver_command(driver: Path, subcommand: str, manifest_path: Path, run_root: Path) -> list[str]:
+def _common_driver_command(
+    driver: Path,
+    subcommand: str,
+    manifest: dict[str, Any],
+    unit: dict[str, Any],
+    attempt_id: str,
+) -> list[str]:
+    raw_root = require_absolute(manifest["paths"]["samples"], "samples").parent
+    for path_key in ("events", "correctness"):
+        if require_absolute(manifest["paths"][path_key], path_key).parent != raw_root:
+            raise ContractError("driver-owned JSONL paths must share one raw directory")
+    compact_key = _artifact(manifest, "benchmark_key_compact")
+    seal_key = _artifact(manifest, "benchmark_key_seal")
+    backend = "stock-seal-reference" if unit["backend"] == "stock-seal" else unit["backend"]
     return [
         str(driver),
         subcommand,
-        "--profile",
-        "paper",
-        "--manifest",
-        str(manifest_path),
-        "--output",
-        str(run_root),
+        "--backend", backend,
+        "--run-id", manifest["run_id"],
+        "--attempt-id", attempt_id,
+        "--planned-unit-id", unit["planned_unit_id"],
+        "--experiment-id", unit["experiment_id"],
+        "--benchmark-key-pair-id", manifest["benchmark_key_pair_id"],
+        "--control-before-id", f"{attempt_id}:control-pre",
+        "--control-after-id", f"{attempt_id}:control-post",
+        "--output", str(raw_root),
+        "--compact-key", compact_key["path"],
+        "--seal-key", seal_key["path"],
+        "--pipeline-input-block-size", str(manifest["parameters"]["pipeline_input_block_size"]),
     ]
 
 
@@ -292,50 +311,49 @@ def command_for_unit(
     experiment = unit["experiment_id"]
     backend = unit["backend"]
     if unit_id == "E1-C1-C2":
-        command = _common_driver_command(driver, "correctness", manifest_path, run_root) + [
-            "--backend", "fpga", "--suite", "c1-c2", "--save-mode", "full"
+        command = _common_driver_command(driver, "correctness", manifest, unit, attempt_id) + [
+            "--profile", "paper", "--suite", "c1-c2", "--save-mode", "full"
         ]
     elif unit_id == "E1-FPGA-TEST":
-        command = _common_driver_command(driver, "correctness", manifest_path, run_root) + [
-            "--backend", "fpga", "--suite", "fpga-test", "--save-mode", "full"
+        command = _common_driver_command(driver, "correctness", manifest, unit, attempt_id) + [
+            "--profile", "paper", "--suite", "fpga-test", "--save-mode", "full"
         ]
     elif unit_id == "E1-C3":
-        command = _common_driver_command(driver, "correctness", manifest_path, run_root) + [
-            "--backend", "fpga", "--suite", "standalone-semantic"
+        command = _common_driver_command(driver, "correctness", manifest, unit, attempt_id) + [
+            "--profile", "paper", "--suite", "standalone-semantic", "--save-mode", "performance"
         ]
     elif unit_id == "E2-LATENCY":
-        command = _common_driver_command(driver, "latency", manifest_path, run_root) + [
-            "--backend", "fpga", "--case", "real_full_4096", "--warmup", "4",
+        command = _common_driver_command(driver, "latency", manifest, unit, attempt_id) + [
+            "--case", "real_full_4096", "--warmup", "4",
             "--repetitions", "50",
         ]
     elif unit_id.startswith("E4-PROCESS-"):
-        command = _common_driver_command(driver, "cold-start", manifest_path, run_root) + [
-            "--backend", "fpga", "--case", "real_short_mixed", "--warmup", "1",
-            "--repetitions", "1",
+        command = _common_driver_command(driver, "cold-start", manifest, unit, attempt_id) + [
+            "--case", "real_short_mixed",
         ]
     elif unit_id == "E4-SUSTAINED":
-        command = _common_driver_command(driver, "robustness", manifest_path, run_root) + [
-            "--backend", "fpga", "--frames", "10000", "--batch", str(metadata["batch_size"]),
+        command = _common_driver_command(driver, "robustness", manifest, unit, attempt_id) + [
+            "--frames", "10000", "--batch", str(metadata["batch_size"]),
         ]
     elif unit_id.startswith("E5-"):
-        driver_backend = "stock-seal" if backend == "stock-seal" else backend
-        command = _common_driver_command(driver, "correctness", manifest_path, run_root) + [
-            "--backend", driver_backend, "--suite", "semantic-matrix", "--trial-seeds", "0,1,2,3,4",
+        command = _common_driver_command(driver, "correctness", manifest, unit, attempt_id) + [
+            "--profile", "paper", "--suite", "semantic-matrix", "--save-mode", "performance",
+            "--trial-seeds", "0,1,2,3,4",
         ]
     elif unit_id in {"E6-FPGA", "E6-SEAL-EMBEDDED"}:
-        command = _common_driver_command(driver, "latency", manifest_path, run_root) + [
-            "--backend", backend, "--case", "real_full_4096", "--warmup", "4",
+        command = _common_driver_command(driver, "latency", manifest, unit, attempt_id) + [
+            "--case", "real_full_4096", "--warmup", "4",
             "--repetitions", "50",
         ]
     elif unit_id in {"E8-BASE", "E8-EXTENSION"}:
         batches = ",".join(str(value) for value in metadata["batch_sizes"])
-        command = _common_driver_command(driver, "throughput", manifest_path, run_root) + [
-            "--backend", "fpga", "--batches", batches, "--repetitions", "20",
+        command = _common_driver_command(driver, "throughput", manifest, unit, attempt_id) + [
+            "--case", "real_full_4096", "--batches", batches, "--repetitions", "20",
         ]
     else:
         raise ContractError(f"no frozen child command for planned unit {unit_id}")
 
-    command.extend(["--attempt-id", attempt_id, "--planned-unit-id", unit_id])
+
     if unit_id == "E1-FPGA-TEST":
         working_directory = require_absolute(
             manifest["repository_state"]["seal_embedded"]["path"], "SEAL-Embedded repository"

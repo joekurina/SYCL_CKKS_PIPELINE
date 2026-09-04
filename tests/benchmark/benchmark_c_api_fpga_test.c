@@ -17,7 +17,9 @@ _Static_assert(sizeof(SYCLBenchmarkConfig) >= offsetof(SYCLBenchmarkConfig, enab
 _Static_assert(offsetof(SYCLBenchmarkTiming, abi_version) == 0, "timing ABI prefix moved");
 _Static_assert(offsetof(SYCLBenchmarkTiming, struct_size) > offsetof(SYCLBenchmarkTiming, abi_version), "timing size prefix moved");
 _Static_assert(offsetof(SYCLBenchmarkTiming, d2h_profiling_available) > offsetof(SYCLBenchmarkTiming, first_entry_start_ns), "timing field order changed");
-_Static_assert(sizeof(SYCLBenchmarkTiming) >= offsetof(SYCLBenchmarkTiming, d2h_profiling_available) + sizeof(uint32_t), "timing is truncated");
+_Static_assert(offsetof(SYCLBenchmarkTiming, additive_wall_breakdown_available) > offsetof(SYCLBenchmarkTiming, d2h_profiling_available), "timing availability field order changed");
+_Static_assert(offsetof(SYCLBenchmarkTiming, graph_submit_wait_wall_ns) > offsetof(SYCLBenchmarkTiming, additive_wall_breakdown_available), "timing wall field order changed");
+_Static_assert(sizeof(SYCLBenchmarkTiming) >= offsetof(SYCLBenchmarkTiming, graph_submit_wait_wall_ns) + sizeof(uint64_t), "timing is truncated");
 
 _Static_assert(offsetof(SYCLBenchmarkEventRecord, abi_version) == 0, "event ABI prefix moved");
 _Static_assert(offsetof(SYCLBenchmarkEventRecord, struct_size) > offsetof(SYCLBenchmarkEventRecord, abi_version), "event size prefix moved");

@@ -232,6 +232,10 @@ def main() -> int:
     }
     artifacts = [freeze_file(name, require_absolute(path.resolve(), name)) for name, path in required_files.items()]
     by_artifact_id = {artifact["artifact_id"]: artifact for artifact in artifacts}
+    benchmark_key_pair_id = sha256_bytes(canonical_json_bytes({
+        "compact_key_sha256": by_artifact_id["benchmark_key_compact"]["sha256"],
+        "seal_key_sha256": by_artifact_id["benchmark_key_seal"]["sha256"],
+    }))
     for artifact_id, expected_sha256 in config["expected_artifact_sha256"].items():
         observed_sha256 = by_artifact_id[artifact_id]["sha256"]
         if observed_sha256 != expected_sha256:
@@ -314,6 +318,7 @@ def main() -> int:
         "repository_state": {"accelerator": accelerator_git, "seal_embedded": seal_git},
         "artifacts": artifacts,
         "report_tree_manifest_sha256": report_tree_manifest_sha256,
+        "benchmark_key_pair_id": benchmark_key_pair_id,
         "environment_sha256": environment_sha256,
         "artifact_index_sha256": artifact_index_sha256,
         "configuration_sha256": configuration_sha256,

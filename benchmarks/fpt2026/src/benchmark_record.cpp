@@ -66,6 +66,30 @@ std::string string_array_json(const std::vector<std::string>& values)
     return output.str();
 }
 
+std::string event_frontiers_json(const std::vector<EventFrontierRecord>& frontiers)
+{
+    std::ostringstream output;
+    output << '[';
+    for (std::size_t i = 0; i < frontiers.size(); ++i) {
+        if (i != 0) {
+            output << ',';
+        }
+        const auto& frontier = frontiers[i];
+        output << '{'
+            << "\"frame_index\":" << frontier.frame_index << ','
+            << "\"profiling_available\":" << bool_json(frontier.profiling_available) << ','
+            << "\"entry_end_ns\":" << optional_integer_json(frontier.entry_end_ns) << ','
+            << "\"fanout_end_ns\":" << optional_integer_json(frontier.fanout_end_ns) << ','
+            << "\"scale_end_ns\":" << optional_integer_json(frontier.scale_end_ns) << ','
+            << "\"poly_end_ns\":" << optional_integer_json(frontier.poly_end_ns) << ','
+            << "\"exit_end_ns\":" << optional_integer_json(frontier.exit_end_ns) << ','
+            << "\"unavailable_reason\":" << optional_string_json(frontier.unavailable_reason)
+            << '}';
+    }
+    output << ']';
+    return output.str();
+}
+
 const char* stage_name(SYCLBenchmarkStage stage)
 {
     switch (stage) {
@@ -244,10 +268,25 @@ std::string timing_record_json(const TimingRecordInput& record)
     add_reason("h2d_device", record.timing.h2d_device_available, "provider_did_not_expose_copy_profiling");
     add_reason("graph_device", record.timing.graph_device_available, "provider_did_not_expose_graph_profiling");
     add_reason("d2h_device", record.timing.d2h_device_available, "provider_did_not_expose_copy_profiling");
+    if (record.identity.backend != "fpga") {
+        add_reason("pack", false, "not_applicable_to_cpu_backend");
+    }
+    add_reason(
+        "h2d_wall", record.timing.additive_wall_breakdown_available,
+        record.identity.backend == "fpga" ? "overlapped_batch_has_no_additive_wall_stage"
+                                           : "not_applicable_to_cpu_backend");
+    add_reason(
+        "graph_submit_wait_wall", record.timing.additive_wall_breakdown_available,
+        record.identity.backend == "fpga" ? "overlapped_batch_has_no_additive_wall_stage"
+                                           : "not_applicable_to_cpu_backend");
+    add_reason(
+        "d2h_wall", record.timing.additive_wall_breakdown_available,
+        record.identity.backend == "fpga" ? "overlapped_batch_has_no_additive_wall_stage"
+                                           : "not_applicable_to_cpu_backend");
 
     output << "},"
         << "\"event_record_ids\":" << string_array_json(record.event_record_ids) << ','
-        << "\"event_frontiers\":[],"
+        << "\"event_frontiers\":" << event_frontiers_json(record.event_frontiers) << ','
         << "\"bytes\":{\"h2d\":" << record.h2d_bytes
         << ",\"d2h\":" << record.d2h_bytes << "},"
         << "\"correctness_record_ids\":" << string_array_json(record.correctness_record_ids) << ','

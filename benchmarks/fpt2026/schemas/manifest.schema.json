@@ -87,7 +87,7 @@
     },
     "root_manifest": {
       "type": "object",
-      "required": ["schema_version", "document_type", "run_id", "campaign_id", "created_utc", "paper_eligible", "paths", "pinned_revisions", "repository_state", "artifacts", "report_tree_manifest_sha256", "environment_sha256", "artifact_index_sha256", "configuration_sha256", "base_plan_sha256", "base_effective_plan_sha256", "timeouts", "parameters", "planned_counts", "branch_state"],
+      "required": ["schema_version", "document_type", "run_id", "campaign_id", "created_utc", "paper_eligible", "paths", "pinned_revisions", "repository_state", "artifacts", "report_tree_manifest_sha256", "benchmark_key_pair_id", "environment_sha256", "artifact_index_sha256", "configuration_sha256", "base_plan_sha256", "base_effective_plan_sha256", "timeouts", "parameters", "planned_counts", "branch_state"],
       "properties": {
         "schema_version": {"const": "1.0"},
         "document_type": {"const": "root_manifest"},
@@ -103,6 +103,7 @@
         "paper_eligible": {"type": "boolean"},
         "repository_state": {"type": "object"},
         "report_tree_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "benchmark_key_pair_id": {"$ref": "#/$defs/sha256"},
         "environment_sha256": {"$ref": "#/$defs/sha256"},
         "artifact_index_sha256": {"$ref": "#/$defs/sha256"},
         "timeouts": {"type": "object", "additionalProperties": {"type": "number", "exclusiveMinimum": 0}},

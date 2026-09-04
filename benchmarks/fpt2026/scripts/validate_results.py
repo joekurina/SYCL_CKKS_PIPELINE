@@ -548,24 +548,78 @@ def validate_samples_events_correctness(
             if value is None and not sample["timing_unavailable_reasons"].get(field):
                 raise ContractError(f"sample {sample['sample_id']} has null {field} without reason")
         timing = sample["timing_ns"]
-        attributed = sum(timing[field] for field in (
-            "preparation", "pack", "h2d_wall", "graph_submit_wait_wall",
-            "d2h_wall", "unpack_and_assembly", "unattributed_wall",
-        ))
+        additive_fields = ("h2d_wall", "graph_submit_wait_wall", "d2h_wall")
+        additive_available = sample["backend"] == "fpga" and sample["batch_size"] == 1
+        if additive_available:
+            if any(field in sample["timing_unavailable_reasons"] for field in additive_fields):
+                raise ContractError(f"sample {sample['sample_id']} suppresses an E2 additive wall region")
+        else:
+            for field in additive_fields:
+                if timing[field] != 0 or not sample["timing_unavailable_reasons"].get(field):
+                    raise ContractError(
+                        f"sample {sample['sample_id']} must mark non-additive {field} unavailable"
+                    )
+        attributed_fields = ["preparation", "pack", "unpack_and_assembly", "unattributed_wall"]
+        if additive_available:
+            attributed_fields.extend(additive_fields)
+        attributed = sum(timing[field] for field in attributed_fields)
         if attributed != timing["application_e2e"]:
             raise ContractError(f"sample {sample['sample_id']} wall-clock breakdown does not reconcile")
-        linked_events = [event_by_id.get(identifier) for identifier in sample["event_record_ids"]]
-        if any(event is None for event in linked_events):
+        linked_event_rows = [event_by_id.get(identifier) for identifier in sample["event_record_ids"]]
+        if any(event is None for event in linked_event_rows):
             raise ContractError(f"sample {sample['sample_id']} has unresolved event links")
+        linked_events = [event for event in linked_event_rows if event is not None]
         expected_links = 0
         if sample["backend"] == "fpga":
             saves = int(sample["mode"]["save_ntt_s"]) + int(sample["mode"]["save_ntt_pte"])
             expected_links = sample["frame_count_submitted"] * (27 + 12 * saves)
         if len(linked_events) != expected_links:
             raise ContractError(f"sample {sample['sample_id']} has incomplete event links")
+        if any(event["sample_id"] != sample["sample_id"] for event in linked_events):
+            raise ContractError(f"sample {sample['sample_id']} links events owned by another phase")
+        if sample["backend"] == "fpga":
+            linked_by_frame: dict[int, list[dict[str, Any]]] = defaultdict(list)
+            for event in linked_events:
+                linked_by_frame[event["frame_index"]].append(event)
+            frontiers = sample["event_frontiers"]
+            if len(frontiers) != sample["frame_count_submitted"]:
+                raise ContractError(f"sample {sample['sample_id']} has incomplete event frontiers")
+            if {row["frame_index"] for row in frontiers} != set(linked_by_frame):
+                raise ContractError(f"sample {sample['sample_id']} frontier frame indices do not resolve")
+            for frontier in frontiers:
+                frame_events = linked_by_frame[frontier["frame_index"]]
+                bounded = {
+                    "entry_end_ns": [row for row in frame_events if row["stage"] == "ENTRY"],
+                    "fanout_end_ns": [row for row in frame_events if row["stage"] == "IFFT_FANOUT"],
+                    "scale_end_ns": [row for row in frame_events if row["stage"] == "SCALE_REDUCE"],
+                    "poly_end_ns": [row for row in frame_events if row["stage"] == "POLY_MULT_NEG_ADD"],
+                    "exit_end_ns": [row for row in frame_events if row["stage"] == "EXIT_C0"],
+                }
+                available = all(
+                    row["profiling_available"]
+                    for rows in bounded.values() for row in rows
+                )
+                if frontier["profiling_available"] != available:
+                    raise ContractError(f"sample {sample['sample_id']} frontier availability disagrees")
+                if available:
+                    if frontier["unavailable_reason"] is not None:
+                        raise ContractError(f"sample {sample['sample_id']} available frontier has a reason")
+                    for field, rows in bounded.items():
+                        if frontier[field] != max(row["command_end_ns"] for row in rows):
+                            raise ContractError(
+                                f"sample {sample['sample_id']} {field} does not match linked events"
+                            )
+                else:
+                    if not frontier["unavailable_reason"] or any(
+                        frontier[field] is not None for field in bounded
+                    ):
+                        raise ContractError(f"sample {sample['sample_id']} unavailable frontier is malformed")
+        elif sample["event_frontiers"]:
+            raise ContractError(f"CPU sample {sample['sample_id']} must not claim FPGA event frontiers")
         linked_correctness = [correctness_by_id.get(identifier) for identifier in sample["correctness_record_ids"]]
         for linked_row in linked_correctness:
-            if linked_row is None or linked_row["passed"] is not True:
+            if (linked_row is None or linked_row["passed"] is not True or
+                    linked_row["sample_id"] != sample["sample_id"]):
                 raise ContractError(
                     f"sample {sample['sample_id']} has unresolved or failing correctness links"
                 )

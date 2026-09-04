@@ -4,7 +4,22 @@
   "title": "FPT 2026 timing sample",
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "nullable_ns": {"type": ["integer", "null"], "minimum": 0}
+    "nullable_ns": {"type": ["integer", "null"], "minimum": 0},
+    "event_frontier": {
+      "type": "object",
+      "required": ["frame_index", "profiling_available", "entry_end_ns", "fanout_end_ns", "scale_end_ns", "poly_end_ns", "exit_end_ns", "unavailable_reason"],
+      "properties": {
+        "frame_index": {"type": "integer", "minimum": 0},
+        "profiling_available": {"type": "boolean"},
+        "entry_end_ns": {"$ref": "#/$defs/nullable_ns"},
+        "fanout_end_ns": {"$ref": "#/$defs/nullable_ns"},
+        "scale_end_ns": {"$ref": "#/$defs/nullable_ns"},
+        "poly_end_ns": {"$ref": "#/$defs/nullable_ns"},
+        "exit_end_ns": {"$ref": "#/$defs/nullable_ns"},
+        "unavailable_reason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
   },
   "type": "object",
   "required": ["schema_version", "record_type", "run_id", "sample_id", "attempt_id", "planned_unit_id", "experiment_id", "backend", "boundary_id", "phase", "case_id", "repetition", "trial_seed_index", "batch_size", "frame_count_submitted", "frame_count_completed", "input", "control_snapshot_ids", "mode", "timing_ns", "timing_unavailable_reasons", "event_record_ids", "event_frontiers", "bytes", "correctness_record_ids", "correctness_summary", "status", "error"],
@@ -16,7 +31,7 @@
     "attempt_id": {"type": "string", "minLength": 1},
     "planned_unit_id": {"type": "string", "minLength": 1},
     "experiment_id": {"type": "string", "pattern": "^E[1-8]$"},
-    "backend": {"enum": ["fpga", "seal-embedded", "stock-seal"]},
+    "backend": {"enum": ["fpga", "seal-embedded", "stock-seal-reference"]},
     "boundary_id": {"const": "application_e2e_v1"},
     "phase": {"type": "string", "minLength": 1},
     "case_id": {"type": "string", "minLength": 1},
@@ -69,7 +84,7 @@
     },
     "timing_unavailable_reasons": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
     "event_record_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-    "event_frontiers": {"type": "array", "items": {"type": "object"}},
+    "event_frontiers": {"type": "array", "items": {"$ref": "#/$defs/event_frontier"}},
     "bytes": {
       "type": "object",
       "required": ["h2d", "d2h"],

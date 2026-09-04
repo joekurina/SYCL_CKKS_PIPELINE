@@ -6,6 +6,7 @@
 #include "fpt2026_benchmark/seal_oracle.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -106,6 +107,7 @@ struct SequenceNumbers {
     std::size_t sample{};
     std::size_t correctness{};
     std::size_t event{};
+    std::size_t frame{};
 };
 
 CommonOptions parse_common(const Arguments& arguments)
@@ -163,6 +165,32 @@ std::vector<std::size_t> parse_size_list(const std::string& text)
     }
     if (result.empty()) {
         throw std::invalid_argument("batch list is empty");
+    }
+    return result;
+}
+
+std::vector<std::size_t> parse_index_list(const std::string& text)
+{
+    std::vector<std::size_t> result;
+    std::size_t begin = 0;
+    while (begin < text.size()) {
+        const std::size_t comma = text.find(',', begin);
+        const std::string item = text.substr(
+            begin, comma == std::string::npos ? std::string::npos : comma - begin);
+        std::size_t consumed = 0;
+        const auto value = std::stoull(item, &consumed, 10);
+        if (item.empty() || consumed != item.size()) {
+            throw std::invalid_argument("index list contains a non-integer");
+        }
+        result.push_back(static_cast<std::size_t>(value));
+        if (comma == std::string::npos) {
+            break;
+        }
+        begin = comma + 1;
+    }
+    if (result.empty() ||
+        std::adjacent_find(result.begin(), result.end()) != result.end()) {
+        throw std::invalid_argument("index list is empty or contains adjacent duplicates");
     }
     return result;
 }
@@ -237,6 +265,80 @@ RecordIdentity identity_for(
     };
 }
 
+std::vector<EventFrontierRecord> derive_event_frontiers(
+    const std::vector<SYCLBenchmarkEventRecord>& events,
+    std::size_t frame_count)
+{
+    std::vector<EventFrontierRecord> frontiers(frame_count);
+    std::vector<std::array<std::size_t, 5>> counts(frame_count);
+    std::vector<bool> all_available(frame_count, true);
+    for (std::size_t frame = 0; frame < frame_count; ++frame) {
+        frontiers[frame].frame_index = frame;
+    }
+    const auto update_max = [](std::optional<std::uint64_t>& value, std::uint64_t candidate) {
+        value = value ? std::max(*value, candidate) : candidate;
+    };
+    for (const auto& event : events) {
+        if (event.frame_index >= frame_count) {
+            throw std::runtime_error("event frame index is outside the submitted batch");
+        }
+        std::size_t dimension = 5;
+        std::optional<std::uint64_t>* destination = nullptr;
+        auto& frontier = frontiers[event.frame_index];
+        switch (event.stage) {
+        case SYCL_BENCHMARK_STAGE_ENTRY:
+            dimension = 0;
+            destination = &frontier.entry_end_ns;
+            break;
+        case SYCL_BENCHMARK_STAGE_IFFT_FANOUT:
+            dimension = 1;
+            destination = &frontier.fanout_end_ns;
+            break;
+        case SYCL_BENCHMARK_STAGE_SCALE_REDUCE:
+            dimension = 2;
+            destination = &frontier.scale_end_ns;
+            break;
+        case SYCL_BENCHMARK_STAGE_POLY_MULT_NEG_ADD:
+            dimension = 3;
+            destination = &frontier.poly_end_ns;
+            break;
+        case SYCL_BENCHMARK_STAGE_EXIT_C0:
+            dimension = 4;
+            destination = &frontier.exit_end_ns;
+            break;
+        default:
+            break;
+        }
+        if (destination == nullptr) {
+            continue;
+        }
+        ++counts[event.frame_index][dimension];
+        if (event.profiling_available == 0) {
+            all_available[event.frame_index] = false;
+        } else {
+            update_max(*destination, event.command_end_ns);
+        }
+    }
+    constexpr std::array<std::size_t, 5> expected_counts = {1, 1, 6, 6, 6};
+    for (std::size_t frame = 0; frame < frame_count; ++frame) {
+        if (counts[frame] != expected_counts) {
+            throw std::runtime_error("bounded event cardinality cannot produce frame frontiers");
+        }
+        auto& frontier = frontiers[frame];
+        if (!all_available[frame]) {
+            frontier.entry_end_ns.reset();
+            frontier.fanout_end_ns.reset();
+            frontier.scale_end_ns.reset();
+            frontier.poly_end_ns.reset();
+            frontier.exit_end_ns.reset();
+            frontier.unavailable_reason = "one_or_more_bounded_events_lack_profiling";
+        } else {
+            frontier.profiling_available = true;
+        }
+    }
+    return frontiers;
+}
+
 void emit_batch(
     const CommonOptions& options,
     const std::vector<BenchmarkVector>& frames,
@@ -254,6 +356,7 @@ void emit_batch(
     }
     const std::string sample_id = options.attempt_id + "-sample-" +
                                   std::to_string(sequence.sample);
+    const std::size_t frame_base = sequence.frame;
     std::vector<std::string> correctness_ids;
     correctness_ids.reserve(frames.size());
     std::vector<std::string> vector_digests;
@@ -272,7 +375,7 @@ void emit_batch(
             record.sample_id = sample_id;
         }
         record.vector_descriptor_sha256 = vector_digests.back();
-        record.frame_index = frame;
+        record.frame_index = frame_base + frame;
         record.metrics = result.correctness[frame];
         append_jsonl_durable(
             options.output / "correctness.jsonl",
@@ -285,6 +388,8 @@ void emit_batch(
     if (events != nullptr) {
         event_ids.reserve(events->size());
         for (const auto& event : *events) {
+            SYCLBenchmarkEventRecord emitted_event = event;
+            emitted_event.frame_index += frame_base;
             const std::string event_id = options.attempt_id + "-event-" +
                                          std::to_string(sequence.event++);
             event_ids.push_back(event_id);
@@ -303,9 +408,18 @@ void emit_batch(
                 event_record_json(
                     event_identity, event_id,
                     measured ? std::optional<std::string>(sample_id) : std::nullopt,
-                    event));
+                    emitted_event));
         }
     }
+
+    std::vector<EventFrontierRecord> event_frontiers;
+    if (events != nullptr) {
+        event_frontiers = derive_event_frontiers(*events, frames.size());
+        for (auto& frontier : event_frontiers) {
+            frontier.frame_index += frame_base;
+        }
+    }
+    sequence.frame += frames.size();
 
     if (!measured) {
         return;
@@ -335,6 +449,7 @@ void emit_batch(
     sample.h2d_bytes = h2d_bytes;
     sample.d2h_bytes = d2h_bytes;
     sample.event_record_ids = std::move(event_ids);
+    sample.event_frontiers = std::move(event_frontiers);
     sample.correctness_record_ids = std::move(correctness_ids);
     sample.max_error = max_error;
     sample.rms_error = std::sqrt(
@@ -408,7 +523,7 @@ int main(int argc, char** argv)
         const CommonOptions options = parse_common(arguments);
         auto allowed = common_allowed();
         if (options.command == "correctness") {
-            add_allowed(allowed, {"profile"});
+            add_allowed(allowed, {"profile", "suite", "save-mode", "trial-seeds"});
             if (arguments.require("profile") != "paper") {
                 throw std::invalid_argument("correctness supports only --profile paper");
             }
@@ -443,8 +558,28 @@ int main(int argc, char** argv)
         bool all_passed = true;
 
         if (options.command == "correctness") {
+            const std::string suite = arguments.require("suite");
+            const std::string save_mode = arguments.require("save-mode");
+            if (save_mode != "performance" && save_mode != "full") {
+                throw std::invalid_argument("--save-mode must be performance or full");
+            }
+            if (suite == "c1-c2") {
+                throw std::runtime_error(
+                    "C1/C2 suite requires the independent production-path NTT oracle");
+            }
+            if (suite != "fpga-test" && suite != "standalone-semantic" &&
+                suite != "semantic-matrix") {
+                throw std::invalid_argument("unknown correctness suite: " + suite);
+            }
+            if ((suite == "fpga-test" || suite == "standalone-semantic") &&
+                options.backend != "fpga") {
+                throw std::invalid_argument("E1 correctness suites require --backend fpga");
+            }
             std::vector<BenchmarkVector> frames;
             for (const auto id : all_vector_cases()) {
+                if (suite == "fpga-test" && is_complex_case(id)) {
+                    continue;
+                }
                 if (options.backend == "seal-embedded" && is_complex_case(id)) {
                     continue;
                 }
@@ -454,27 +589,46 @@ int main(int argc, char** argv)
                 frames.push_back(generate_benchmark_vector(id));
                 publish_vector_artifact(options.output, frames.back());
             }
-            const auto seeds = make_seeds(options, frames, 0, 0);
+            const std::vector<std::size_t> trial_indices = suite == "semantic-matrix"
+                ? parse_index_list(arguments.require("trial-seeds"))
+                : std::vector<std::size_t>{0};
+            if (suite == "semantic-matrix" &&
+                trial_indices != std::vector<std::size_t>{0, 1, 2, 3, 4}) {
+                throw std::invalid_argument(
+                    "semantic-matrix requires exact trial seeds 0,1,2,3,4");
+            }
+            std::optional<AcceleratorRunner> accelerator;
             if (options.backend == "fpga") {
-                AcceleratorRunner accelerator(cpu, oracle, frames.size(), true, true);
-                const auto result = accelerator.encrypt(frames, seeds);
-                if (result.pipeline_input_block_size != options.pipeline_input_block_size) {
-                    throw std::runtime_error("measured PipelineInputBlock size differs from provenance");
+                const bool full_diagnostics = save_mode == "full";
+                accelerator.emplace(
+                    cpu, oracle, frames.size(), full_diagnostics, full_diagnostics);
+            }
+            for (const std::size_t trial_index : trial_indices) {
+                const auto seeds = make_seeds(options, frames, trial_index, sequence.frame);
+                const std::string check_id = suite == "fpga-test" ? "FPGA-Test" : "C3";
+                if (accelerator) {
+                    const auto result = accelerator->encrypt(frames, seeds);
+                    if (result.pipeline_input_block_size != options.pipeline_input_block_size) {
+                        throw std::runtime_error(
+                            "measured PipelineInputBlock size differs from provenance");
+                    }
+                    emit_batch(options, frames, result, &result.events, "correctness", check_id,
+                               trial_index, false, sequence);
+                    all_passed = all_passed && result.passed;
+                } else if (options.backend == "seal-embedded") {
+                    const auto result = cpu.encrypt(frames, seeds);
+                    emit_batch(options, frames, result, nullptr, "correctness", check_id,
+                               trial_index, false, sequence);
+                    all_passed = all_passed && result.passed;
+                } else {
+                    const auto result = stock_reference_batch(oracle, frames, seeds);
+                    emit_batch(options, frames, result, nullptr, "correctness", check_id,
+                               trial_index, false, sequence);
+                    all_passed = all_passed && result.passed;
                 }
-                emit_batch(options, frames, result, &result.events, "correctness", "C3", 0,
-                           false, sequence);
-                all_passed = result.passed;
-                accelerator.close();
-            } else if (options.backend == "seal-embedded") {
-                const auto result = cpu.encrypt(frames, seeds);
-                emit_batch(options, frames, result, nullptr, "correctness", "semantic", 0,
-                           false, sequence);
-                all_passed = result.passed;
-            } else {
-                const auto result = stock_reference_batch(oracle, frames, seeds);
-                emit_batch(options, frames, result, nullptr, "correctness", "semantic", 0,
-                           false, sequence);
-                all_passed = result.passed;
+            }
+            if (accelerator) {
+                accelerator->close();
             }
         } else if (options.command == "latency") {
             if (options.backend == "stock-seal-reference") {

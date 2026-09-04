@@ -174,7 +174,6 @@ AcceleratorBatchResult AcceleratorRunner::encrypt(
     api_timing.struct_size = sizeof(api_timing);
     std::size_t records_written = 0;
     char error[512]{};
-    const auto api_begin = Clock::now();
     check_accelerator_status(
         SYCL_benchmark_encrypt_batch(
             session_, frames.size(), inputs.encoding_buffers.data(),
@@ -185,12 +184,11 @@ AcceleratorBatchResult AcceleratorRunner::encrypt(
             &api_timing, result.events.data(), result.events.size(),
             &records_written, error, sizeof(error)),
         error, "SYCL_benchmark_encrypt_batch");
-    const auto api_end = Clock::now();
     if (records_written != exact_event_count) {
         throw std::runtime_error("accelerator returned the wrong event-record count");
     }
     if (api_timing.accelerator_api_wall_ns == 0) {
-        api_timing.accelerator_api_wall_ns = elapsed_ns(api_begin, api_end);
+        throw std::runtime_error("accelerator returned an impossible zero API wall interval");
     }
 
     result.timing.pack_wall_ns = api_timing.pack_wall_ns;
@@ -199,18 +197,15 @@ AcceleratorBatchResult AcceleratorRunner::encrypt(
     result.timing.graph_device_ns = api_timing.graph_device_ns;
     result.timing.d2h_device_ns = api_timing.d2h_device_ns;
     result.timing.d2h_wall_ns = api_timing.d2h_wall_ns;
+    result.timing.graph_submit_wait_wall_ns = api_timing.graph_submit_wait_wall_ns;
     result.timing.h2d_device_available = api_timing.h2d_profiling_available != 0;
     result.timing.graph_device_available = api_timing.graph_profiling_available != 0;
     result.timing.d2h_device_available = api_timing.d2h_profiling_available != 0;
-    const std::uint64_t api_non_graph = api_timing.pack_wall_ns +
-                                        api_timing.h2d_wall_ns +
-                                        api_timing.d2h_wall_ns +
-                                        api_timing.unpack_wall_ns;
-    if (api_non_graph > api_timing.accelerator_api_wall_ns) {
-        throw std::runtime_error("accelerator wall subintervals exceed the API wall interval");
+    result.timing.additive_wall_breakdown_available =
+        api_timing.additive_wall_breakdown_available != 0;
+    if (result.timing.additive_wall_breakdown_available != (frames.size() == 1)) {
+        throw std::runtime_error("accelerator additive wall-breakdown availability is inconsistent");
     }
-    result.timing.graph_submit_wait_wall_ns =
-        api_timing.accelerator_api_wall_ns - api_non_graph;
     result.pipeline_input_block_size = extract_pipeline_input_block_size(result.events);
 
     const auto assembly_begin = Clock::now();
@@ -232,10 +227,12 @@ AcceleratorBatchResult AcceleratorRunner::encrypt(
     result.timing.unpack_assembly_wall_ns =
         api_timing.unpack_wall_ns + elapsed_ns(assembly_begin, application_end);
     result.timing.application_e2e_ns = elapsed_ns(application_begin, application_end);
-    const std::uint64_t attributed = result.timing.preparation_wall_ns +
-        result.timing.pack_wall_ns + result.timing.h2d_wall_ns +
-        result.timing.graph_submit_wait_wall_ns + result.timing.d2h_wall_ns +
-        result.timing.unpack_assembly_wall_ns;
+    std::uint64_t attributed = result.timing.preparation_wall_ns +
+        result.timing.pack_wall_ns + result.timing.unpack_assembly_wall_ns;
+    if (result.timing.additive_wall_breakdown_available) {
+        attributed += result.timing.h2d_wall_ns +
+            result.timing.graph_submit_wait_wall_ns + result.timing.d2h_wall_ns;
+    }
     if (attributed > result.timing.application_e2e_ns) {
         throw std::runtime_error("host wall regions exceed application_e2e_ns");
     }

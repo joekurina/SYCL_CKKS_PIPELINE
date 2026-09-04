@@ -319,34 +319,47 @@ endif()
 
 if(SYCL_CKKS_BUILD_BENCHMARK_SOURCE_FPGA_TESTS)
     enable_language(C)
+    include(CTest)
     target_compile_definitions(sycl_ckks_accelerator_obj PRIVATE SYCL_CKKS_BENCHMARK_PRIVATE_TEST=1)
 
-    add_library(sycl_ckks_benchmark_c_api_fpga_test OBJECT EXCLUDE_FROM_ALL
+    function(add_sycl_ckks_benchmark_source_fpga_test target source)
+        add_executable(${target} EXCLUDE_FROM_ALL ${source})
+        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_link_libraries(${target} PRIVATE
+            sycl_ckks_accelerator
+            ${SYCL_CKKS_NTT_RTL_ARCHIVE}
+            ${SYCL_CKKS_IFFT_RTL_ARCHIVE})
+        add_test(NAME ${target} COMMAND ${target})
+        set_tests_properties(${target} PROPERTIES LABELS "FPGA Test;benchmark-source")
+    endfunction()
+
+    add_sycl_ckks_benchmark_source_fpga_test(
+        sycl_ckks_benchmark_c_api_fpga_test
         tests/benchmark/benchmark_c_api_fpga_test.c)
     set_target_properties(sycl_ckks_benchmark_c_api_fpga_test PROPERTIES
-        C_STANDARD 11
-        C_STANDARD_REQUIRED YES
-        C_EXTENSIONS NO)
-    target_include_directories(sycl_ckks_benchmark_c_api_fpga_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO LINKER_LANGUAGE CXX)
 
-    add_library(sycl_ckks_benchmark_cpp_api_fpga_test OBJECT EXCLUDE_FROM_ALL
+    add_sycl_ckks_benchmark_source_fpga_test(
+        sycl_ckks_benchmark_cpp_api_fpga_test
         tests/benchmark/benchmark_cpp_api_fpga_test.cpp)
     target_compile_features(sycl_ckks_benchmark_cpp_api_fpga_test PRIVATE cxx_std_17)
-    target_include_directories(sycl_ckks_benchmark_cpp_api_fpga_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-    add_library(sycl_ckks_benchmark_lifecycle_fpga_test OBJECT EXCLUDE_FROM_ALL
+    add_sycl_ckks_benchmark_source_fpga_test(
+        sycl_ckks_benchmark_lifecycle_fpga_test
         tests/benchmark/benchmark_lifecycle_fpga_test.cpp)
     target_compile_features(sycl_ckks_benchmark_lifecycle_fpga_test PRIVATE cxx_std_17)
-    target_include_directories(sycl_ckks_benchmark_lifecycle_fpga_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+    add_sycl_ckks_benchmark_source_fpga_test(
+        sycl_ckks_benchmark_public_lifecycle_fpga_test
+        tests/benchmark/benchmark_public_lifecycle_fpga_test.cpp)
+    target_compile_features(sycl_ckks_benchmark_public_lifecycle_fpga_test PRIVATE cxx_std_17)
 
     add_custom_target(sycl_ckks_benchmark_source_fpga_tests
         DEPENDS
             sycl_ckks_benchmark_c_api_fpga_test
             sycl_ckks_benchmark_cpp_api_fpga_test
-            sycl_ckks_benchmark_lifecycle_fpga_test)
+            sycl_ckks_benchmark_lifecycle_fpga_test
+            sycl_ckks_benchmark_public_lifecycle_fpga_test)
 endif()
 
 install(FILES ${SYCL_CKKS_MERGED_ARCHIVE}

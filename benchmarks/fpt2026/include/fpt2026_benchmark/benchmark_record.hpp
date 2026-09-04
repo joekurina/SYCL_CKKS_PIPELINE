@@ -26,6 +26,17 @@ struct RecordIdentity {
     std::size_t trial_seed_index{};
 };
 
+struct EventFrontierRecord {
+    std::size_t frame_index{};
+    bool profiling_available{};
+    std::optional<std::uint64_t> entry_end_ns;
+    std::optional<std::uint64_t> fanout_end_ns;
+    std::optional<std::uint64_t> scale_end_ns;
+    std::optional<std::uint64_t> poly_end_ns;
+    std::optional<std::uint64_t> exit_end_ns;
+    std::optional<std::string> unavailable_reason;
+};
+
 struct TimingRecordInput {
     RecordIdentity identity;
     std::string sample_id;
@@ -45,6 +56,7 @@ struct TimingRecordInput {
     std::uint64_t h2d_bytes{};
     std::uint64_t d2h_bytes{};
     std::vector<std::string> event_record_ids;
+    std::vector<EventFrontierRecord> event_frontiers;
     std::vector<std::string> correctness_record_ids;
     double max_error{};
     double rms_error{};

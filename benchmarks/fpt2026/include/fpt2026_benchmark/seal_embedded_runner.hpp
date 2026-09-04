@@ -47,6 +47,7 @@ struct TimingBreakdown {
     bool h2d_device_available{};
     bool graph_device_available{};
     bool d2h_device_available{};
+    bool additive_wall_breakdown_available{};
 };
 
 struct ResidueBatch {
