@@ -2,8 +2,10 @@
 
 #include "fpt2026_benchmark/benchmark_vectors.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <ctime>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
