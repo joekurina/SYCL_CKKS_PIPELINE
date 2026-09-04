@@ -348,7 +348,8 @@ void emit_batch(
     const std::string& check_id,
     std::size_t repetition,
     bool measured,
-    SequenceNumbers& sequence)
+    SequenceNumbers& sequence,
+    std::optional<std::uint64_t> cold_first_result_ns = std::nullopt)
 {
     if (frames.size() != result.correctness.size() ||
         frames.size() != result.trial_seed_digests.size()) {
@@ -446,6 +447,7 @@ void emit_batch(
     sample.frame_count_submitted = frames.size();
     sample.frame_count_completed = result.correctness.size();
     sample.timing = result.timing;
+    sample.cold_first_result_ns = cold_first_result_ns;
     sample.h2d_bytes = h2d_bytes;
     sample.d2h_bytes = d2h_bytes;
     sample.event_record_ids = std::move(event_ids);
@@ -518,6 +520,7 @@ void add_allowed(std::vector<std::string>& values, std::initializer_list<const c
 int main(int argc, char** argv)
 {
     using namespace fpt2026;
+    const auto process_begin = std::chrono::steady_clock::now();
     try {
         Arguments arguments(argc, argv);
         const CommonOptions options = parse_common(arguments);
@@ -644,7 +647,7 @@ int main(int argc, char** argv)
             }
             for (std::size_t repetition = 0; repetition < warmups + repetitions; ++repetition) {
                 const auto frames = repeat_vector(input, 1);
-                const auto seeds = make_seeds(options, frames, repetition, 0);
+                const auto seeds = make_seeds(options, frames, repetition, sequence.frame);
                 const bool measured = repetition >= warmups;
                 const std::string phase = measured ? "warm_measured" : "warmup";
                 if (accelerator) {
@@ -688,7 +691,8 @@ int main(int argc, char** argv)
                 frame_index += batch;
             }
             for (std::size_t repetition = 0; repetition < repetitions; ++repetition) {
-                for (const std::size_t batch : batches) {
+                for (std::size_t position = 0; position < batches.size(); ++position) {
+                    const std::size_t batch = batches[(repetition + position) % batches.size()];
                     const auto frames = repeat_vector(input, batch);
                     const auto seeds = make_seeds(options, frames, repetition, frame_index);
                     const auto result = accelerator.encrypt(frames, seeds);
@@ -734,26 +738,47 @@ int main(int argc, char** argv)
                 ++repetition;
             }
             accelerator.close();
+        } else if (options.command == "cold-start") {
+            if (options.backend != "fpga") {
+                throw std::invalid_argument("cold-start requires --backend fpga");
+            }
+            const auto input = generate_benchmark_vector(
+                parse_vector_case(arguments.require("case")));
+            publish_vector_artifact(options.output, input);
+            AcceleratorRunner accelerator(cpu, oracle, 1, false, false);
+            for (std::size_t repetition = 0; repetition < 2; ++repetition) {
+                const auto frames = repeat_vector(input, 1);
+                const auto seeds = make_seeds(options, frames, repetition, sequence.frame);
+                const auto result = accelerator.encrypt(frames, seeds);
+                const auto verified = std::chrono::steady_clock::now();
+                const auto cold_ns = repetition == 0
+                    ? std::optional<std::uint64_t>(static_cast<std::uint64_t>(
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              verified - process_begin).count()))
+                    : std::nullopt;
+                emit_batch(options, frames, result, &result.events,
+                           repetition == 0 ? "cold_first_result" : "warm_after_first",
+                           "timed-semantic", repetition, true, sequence, cold_ns);
+                all_passed = all_passed && result.passed;
+            }
+            accelerator.close();
         } else {
             const auto input = generate_benchmark_vector(parse_vector_case(arguments.require("case")));
             publish_vector_artifact(options.output, input);
-            const std::size_t batch = options.command == "profiler-diagnostic"
-                ? arguments.require_size("batch") : 1;
+            const std::size_t batch = arguments.require_size("batch");
             const auto frames = repeat_vector(input, batch);
-            const auto seeds = make_seeds(options, frames, 0, 0);
+            const auto seeds = make_seeds(options, frames, 0, sequence.frame);
             if (options.backend == "fpga") {
                 AcceleratorRunner accelerator(cpu, oracle, batch, false, false);
                 const auto result = accelerator.encrypt(frames, seeds);
                 emit_batch(options, frames, result, &result.events,
-                           options.command == "cold-start" ? "cold_process" : "diagnostic",
-                           "timed-semantic", 0, true, sequence);
+                           "diagnostic", "timed-semantic", 0, true, sequence);
                 all_passed = result.passed;
                 accelerator.close();
             } else if (options.backend == "seal-embedded") {
                 const auto result = cpu.encrypt(frames, seeds);
                 emit_batch(options, frames, result, nullptr,
-                           options.command == "cold-start" ? "cold_process" : "diagnostic",
-                           "timed-semantic", 0, true, sequence);
+                           "diagnostic", "timed-semantic", 0, true, sequence);
                 all_passed = result.passed;
             } else {
                 throw std::invalid_argument("stock-seal-reference is correctness-only");
