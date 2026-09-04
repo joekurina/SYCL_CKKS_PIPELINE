@@ -34,13 +34,20 @@ set(MICROSOFT_SEAL_ROOT "" CACHE PATH "Pinned Microsoft SEAL source/install root
 set(MICROSOFT_SEAL_LIBRARY "" CACHE FILEPATH "Pinned Microsoft SEAL static archive")
 set(FPGA_REPORT_ROOT "" CACHE PATH "Pinned seed-7 report root")
 set(FPT2026_REUSE_EXE "" CACHE FILEPATH "Optional seed-7 anchor executable")
+option(FPT2026_ALLOW_DIRTY_DIAGNOSTIC
+       "Allow dirty dependency trees for non-paper diagnostic builds" OFF)
 
 set(SYCL_CKKS_ACCELERATOR_EXPECTED_COMMIT
-    "205e39ddaad1c67d87bae861faf2bf435bab51ae" CACHE STRING "Expected accelerator revision")
+    "" CACHE STRING "Exact committed 8k_benchmarks implementation revision")
 set(SEAL_EMBEDDED_EXPECTED_COMMIT
     "0913fa9afe1f2bdc0d995f853a685aceea6d3cd0" CACHE STRING "Expected SEAL-Embedded revision")
 set(MICROSOFT_SEAL_EXPECTED_COMMIT
     "79234726053c45eede688400aa219fdec0810bd8" CACHE STRING "Expected Microsoft SEAL revision")
+
+if(NOT SYCL_CKKS_ACCELERATOR_EXPECTED_COMMIT MATCHES "^[0-9a-f]{40}$")
+    message(FATAL_ERROR
+        "SYCL_CKKS_ACCELERATOR_EXPECTED_COMMIT must name the exact committed benchmark implementation")
+endif()
 
 fpt2026_require_absolute_existing_directory(SYCL_CKKS_ACCELERATOR_ROOT)
 fpt2026_require_absolute_existing_file(SYCL_CKKS_ACCELERATOR_LIBRARY)
@@ -50,6 +57,49 @@ fpt2026_require_absolute_existing_file(SEAL_EMBEDDED_KEY)
 fpt2026_require_absolute_existing_directory(MICROSOFT_SEAL_ROOT)
 fpt2026_require_absolute_existing_file(MICROSOFT_SEAL_LIBRARY)
 fpt2026_require_absolute_existing_directory(FPGA_REPORT_ROOT)
+
+find_package(Git REQUIRED)
+function(fpt2026_require_git_state repository expected_head expected_branch label)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${repository}" rev-parse HEAD
+        RESULT_VARIABLE result OUTPUT_VARIABLE observed_head
+        ERROR_VARIABLE git_error OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT result EQUAL 0 OR NOT observed_head STREQUAL expected_head)
+        message(FATAL_ERROR
+            "${label} HEAD mismatch: expected ${expected_head}, observed ${observed_head}; ${git_error}")
+    endif()
+    if(NOT "${expected_branch}" STREQUAL "")
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${repository}" branch --show-current
+            RESULT_VARIABLE result OUTPUT_VARIABLE observed_branch
+            ERROR_VARIABLE git_error OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT result EQUAL 0 OR NOT observed_branch STREQUAL expected_branch)
+            message(FATAL_ERROR
+                "${label} branch mismatch: expected ${expected_branch}, observed ${observed_branch}; ${git_error}")
+        endif()
+    endif()
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${repository}" status --porcelain=v1 --untracked-files=all
+        RESULT_VARIABLE result OUTPUT_VARIABLE dirty_state
+        ERROR_VARIABLE git_error OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "Cannot inspect ${label} worktree: ${git_error}")
+    endif()
+    if(NOT "${dirty_state}" STREQUAL "" AND NOT FPT2026_ALLOW_DIRTY_DIAGNOSTIC)
+        message(FATAL_ERROR
+            "${label} worktree is dirty; paper builds require committed sources")
+    endif()
+endfunction()
+
+fpt2026_require_git_state(
+    "${SYCL_CKKS_ACCELERATOR_ROOT}" "${SYCL_CKKS_ACCELERATOR_EXPECTED_COMMIT}"
+    "8k_benchmarks" "SYCL accelerator")
+fpt2026_require_git_state(
+    "${SEAL_EMBEDDED_ROOT}" "${SEAL_EMBEDDED_EXPECTED_COMMIT}"
+    "" "SEAL-Embedded")
+fpt2026_require_git_state(
+    "${MICROSOFT_SEAL_ROOT}" "${MICROSOFT_SEAL_EXPECTED_COMMIT}"
+    "" "Microsoft SEAL")
 
 set(_accelerator_header
     "${SYCL_CKKS_ACCELERATOR_ROOT}/include/sycl_ckks_accelerator/SYCL_ckks_benchmark.h")

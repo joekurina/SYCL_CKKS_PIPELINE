@@ -87,6 +87,21 @@ def git_text(repository: Path, *arguments: str) -> str:
     return process.stdout.strip()
 
 
+def git_is_ancestor(repository: Path, ancestor: str, descendant: str = "HEAD") -> bool:
+    process = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=repository,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if process.returncode not in (0, 1):
+        raise ContractError(
+            f"cannot test Git ancestry in {repository}: {process.stderr.strip()}"
+        )
+    return process.returncode == 0
+
+
 def freeze_repository(repository: Path, allow_dirty: bool) -> dict[str, Any]:
     require_absolute(repository, "repository")
     if not (repository / ".git").exists():
@@ -192,6 +207,13 @@ def main() -> int:
     seal_git = freeze_repository(seal_repository, args.allow_dirty_diagnostic)
     if accelerator_git["branch"] != "8k_benchmarks":
         raise ContractError(f"accelerator branch must be 8k_benchmarks, observed {accelerator_git['branch']!r}")
+    accelerator_baseline = config["pinned_revisions"]["accelerator_baseline_commit"]
+    if not git_is_ancestor(accelerator_repository, accelerator_baseline):
+        raise ContractError(
+            f"accelerator implementation is not descended from baseline {accelerator_baseline}"
+        )
+    accelerator_git["baseline_commit"] = accelerator_baseline
+    accelerator_git["baseline_is_ancestor"] = True
     expected_seal = config["pinned_revisions"]["seal_embedded_commit"]
     if seal_git["head"] != expected_seal:
         raise ContractError(f"SEAL-Embedded HEAD differs from pinned commit {expected_seal}")
